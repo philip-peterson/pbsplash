@@ -15,14 +15,15 @@
 #include "nanosvgrast.h"
 
 #define MSG_MAX_LEN 4096
-#define FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
+#define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 
 int usage()
 {
    fprintf(stderr, "pbsplash: a simple fbsplash tool\n");
    fprintf(stderr, "--------------------------------\n");
-   fprintf(stderr, "pbsplash [-h] [-s splash image] [-m message]\n\n");
+   fprintf(stderr, "pbsplash [-h] [-f font] [-s splash image] [-m message]\n\n");
    fprintf(stderr, "    -h          show this help\n");
+   fpritnf(stderr, "    -f          path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
    fprintf(stderr, "    -s          path to splash image to display\n");
    fprintf(stderr, "    -m          message to show under the splash image\n");
 
@@ -222,7 +223,7 @@ int main(int argc, char **argv)
       }
    }
 
-   if ((rc = tfb_acquire_fb(0, "/dev/fb0", "/dev/tty1")) != TFB_SUCCESS)
+   if ((rc = tfb_acquire_fb(TFB_FL_NO_TTY_KD_GRAPHICS, "/dev/fb0", "/dev/tty1")) != TFB_SUCCESS)
    {
       fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
       rc = 1;
@@ -242,9 +243,9 @@ int main(int argc, char **argv)
    {
       fprintf(stderr, "failed to load SVG image\n");
       rc = 1;
-      return rc;
+      goto release_fb;
    }
-   font = nsvgParseFromFile(FONT_PATH, "px", 500);
+   font = nsvgParseFromFile(DEFAULT_FONT_PATH, "px", 500);
    if (!font || !font->shapes)
    {
       fprintf(stderr, "failed to load SVG font\n");
@@ -279,5 +280,7 @@ out:
    nsvgDelete(font);
 free_image:
    nsvgDelete(image);
+release_fb:
+   tfb_release_fb();
    return rc;
 }

@@ -1371,7 +1371,7 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 	NSVGedge *e = NULL;
 	NSVGcachedPaint cache;
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
-	int i = 0, textLen = strlen(text);
+	int i = 0, j = 0, textLen = strlen(text);
 
 	r->bitmap = dst;
 	r->width = w;
@@ -1381,26 +1381,38 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 	if (w > r->cscanline) {
 		r->cscanline = w;
 		r->scanline = (unsigned char*)realloc(r->scanline, w);
-		if (r->scanline == NULL) return;
+		if (r->scanline == NULL) {
+			return;
+		}
 	}
 
 	for (i = 0; i < h; i++)
 		memset(&dst[i*stride], 0, w*4);
 
-	for (shape = shapes[i]; i < textLen; i++) {
+	for (i = 0; i < textLen; i++) {
+		shape = shapes[i];
+		if (!shape) {
+			if (text[i] == ' ')
+				tx += font->defaultHorizAdv * scale;
+			continue;
+		}
 		if (!(shape->flags & NSVG_FLAGS_VISIBLE))
 			continue;
 
+		if (i == 0 && strcmp(shape->id, "OpenSansRegular") == 0)
+			tx -= shape->horizAdvX * scale;
+
 		if (shape->fill.type != NSVG_PAINT_NONE) {
 			nsvg__resetPool(r);
+			shape->fill.color = 0xffffffff;
 			r->freelist = NULL;
 			r->nedges = 0;
 
 			nsvg__flattenShape(r, shape, scale);
 
 			// Scale and translate edges
-			for (i = 0; i < r->nedges; i++) {
-				e = &r->edges[i];
+			for (j = 0; j < r->nedges; j++) {
+				e = &r->edges[j];
 				e->x0 = tx + e->x0;
 				e->y0 = (ty + e->y0) * NSVG__SUBSAMPLES;
 				e->x1 = tx + e->x1;
@@ -1425,8 +1437,8 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 //			dumpEdges(r, "edge.svg");
 
 			// Scale and translate edges
-			for (i = 0; i < r->nedges; i++) {
-				e = &r->edges[i];
+			for (j = 0; j < r->nedges; j++) {
+				e = &r->edges[j];
 				e->x0 = tx + e->x0;
 				e->y0 = (ty + e->y0) * NSVG__SUBSAMPLES;
 				e->x1 = tx + e->x1;
@@ -1441,9 +1453,12 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 
 			nsvg__rasterizeSortedEdges(r, tx,ty,scale, &cache, NSVG_FILLRULE_NONZERO);
 		}
+		tx += shape->horizAdvX * scale;
 	}
 
 	nsvg__unpremultiplyAlpha(dst, w, h, stride);
+
+	free(shapes);
 
 	r->bitmap = NULL;
 	r->width = 0;

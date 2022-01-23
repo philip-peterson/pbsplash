@@ -123,11 +123,11 @@ static void drawPath(float *pts, int npts, int xoff, int yoff, float scale_x, fl
 // scaled based on the target width and height.
 static void draw_svg(NSVGimage *image, int x, int y, int width, int height)
 {
-   fprintf(stdout, "size: %f x %f\n", image->width, image->height);
+   //fprintf(stdout, "size: %f x %f\n", image->width, image->height);
    float sz = (float)width / image->width;
    int w = image->width * sz + 0.5;
    int h = image->height * sz + 0.5;
-   fprintf(stdout, "scale: %f\n", sz);
+   //fprintf(stdout, "scale: %f\n", sz);
 
    NSVGrasterizer *rast = nsvgCreateRasterizer();
    unsigned char *img = malloc(w * h * 4);
@@ -145,73 +145,78 @@ static void draw_svg(NSVGimage *image, int x, int y, int width, int height)
    free(img);
 }
 
-static void draw_text(NSVGimage *font, char *text, int x, int y, float scale)
+static void getTextDimensions(NSVGimage *font, char *text, float scale, int *width, int *height)
 {
-   int width, height = 200;
-   printf("text: %s\n", text);
+   int i = 0;
+
+   *width = 0;
+   *height = (font->fontAscent - font->fontDescent) * scale;
    NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
    for (size_t i = 0; i < strlen(text); i++)
    {
-      width += shapes[i]->horizAdvX * scale + 1;
+      NSVGshape *shape = shapes[i];
+      if (shape) {
+         *width += shapes[i]->horizAdvX * scale + 1;
+      } else {
+         *width += font->defaultHorizAdv * scale;
+      }
+      
    }
+}
+
+static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale)
+{
+   //printf("text: %s, scale: %f, x: %d, y: %d\n", text, scale, x, y);
+   NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
    unsigned char *img = malloc(width * height * 4);
    NSVGrasterizer *rast = nsvgCreateRasterizer();
 
-   printf("text dimensions: %d x %d\n", width, height);
+   //printf("text dimensions: %d x %d\n", width, height); 
 
-   nsvgRasterize(rast, font, 0, 0, scale, img, width, height, width * 4);
+   nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
 
    for (size_t i = 0; i < width; i++)
    {
       for (size_t j = 0; j < height; j++)
       {
          unsigned int col = tfb_make_color(img[(j * width + i) * 4 + 0], img[(j * width + i) * 4 + 1], img[(j * width + i) * 4 + 2]);
-         tfb_draw_pixel(x + i, y - j, col);
+         tfb_draw_pixel(x + i, y + height - j, col);
       }
    }
 
    free(img);
+   free(shapes);
 }
 
 int main(int argc, char **argv)
 {
    int rc = 0;
    int opt;
-   char *message = calloc(MSG_MAX_LEN, 1);
+   char *message;
+   char *logoText = "postmarketOS";
    char *splash_image;
    NSVGimage *image;
    NSVGimage *font;
+   int textWidth, textHeight;
 
    for (int i = 1; i < argc; i++)
    {
-      printf("%d: %s\n", i, argv[i]);
       if (strcmp(argv[i], "-h") == 0)
       {
          rc = usage();
-         goto out;
+         return rc;
       }
 
       if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
       {
          splash_image = argv[i + 1];
-         printf("splash_image path: %s\n", splash_image);
+         //printf("splash_image path: %s\n", splash_image);
          continue;
       }
 
       if (strcmp(argv[i], "-m") == 0)
       {
-         if (*argv[i + 1] == '-')
-         {
-            rc = read(STDIN_FILENO, message, MSG_MAX_LEN);
-            if (rc < 0)
-               goto out;
-            printf("%s\n", message);
-         }
-         else
-         {
-            free(message);
-            message = argv[i + 1];
-         }
+         message = argv[i + 1];
          printf("message: %s\n", message);
          continue;
       }
@@ -221,55 +226,58 @@ int main(int argc, char **argv)
    {
       fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
       rc = 1;
-      goto out;
+      return rc;
    }
 
    int w = (int)tfb_screen_width();
    int h = (int)tfb_screen_height();
    float sz = (float)(w < h ? w : h) * 0.5f;
-   fprintf(stdout, "w=%du, h=%du\n", w, h);
+   //fprintf(stdout, "w=%du, h=%du\n", w, h);
    float x = (float)w / 2 - sz / 2;
    float y = (float)h / 2 - sz / 2 - 300;
-   fprintf(stdout, "x=%f, y=%f, sz=%f\n", x, y, sz);
+   //fprintf(stdout, "x=%f, y=%f, sz=%f\n", x, y, sz);
 
    image = nsvgParseFromFile(splash_image, "px", 96);
    if (!image)
    {
       fprintf(stderr, "failed to load SVG image\n");
       rc = 1;
-      goto out;
+      return rc;
    }
    font = nsvgParseFromFile(FONT_PATH, "px", 500);
    if (!font || !font->shapes)
    {
       fprintf(stderr, "failed to load SVG font\n");
       rc = 1;
-      goto out; 
+      goto free_image;
    }
-   float fontsz = 0.05f;
-   fprintf(stdout, "font size: %f\n", fontsz);
 
    /* Paint the whole screen in black */
    tfb_clear_screen(tfb_black);
-   /* Draw some text on-screen */
-   tfb_draw_string_scaled(x + 75, y + sz + 40, tfb_white, tfb_black, 4, 4, "postmarketOS");
-
-   if (message)
-   {
-      tfb_draw_string_scaled_wrapped(50, (int)((float)h * 0.6), tfb_white, tfb_black, 2, 2, 80, message);
-   }
 
    draw_svg(image, x, y, sz, sz);
 
-   draw_text(font, "postmarketOS", 100, h / 2.f + 100, fontsz);
+   float fontsz = (sz * 0.25) / (font->fontAscent - font->fontDescent);
+   //fprintf(stdout, "font size: %f\n", fontsz);
+
+   getTextDimensions(font, logoText, fontsz, &textWidth, &textHeight);
+   
+   draw_text(font, logoText, w / 2.f - textWidth / 2.f, y + sz + sz*0.2, textWidth, textHeight, fontsz);
+
+   fontsz = (sz * 0.1) / (font->fontAscent - font->fontDescent);
+
+   getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
+
+   draw_text(font, message, w / 2.f - textWidth / 2.f, y + sz * 2, textWidth, textHeight, fontsz);
+   printf("Rendered text: %s\n", message);
 
    tfb_flush_window();
    tfb_flush_fb();
 
-   sleep(20);
+   //sleep(20);
 out:
+   nsvgDelete(font);
+free_image:
    nsvgDelete(image);
-   tfb_release_fb();
-   free(message);
    return rc;
 }

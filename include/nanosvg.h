@@ -161,6 +161,9 @@ typedef struct NSVGimage
 {
 	float width;				// Width of the image.
 	float height;				// Height of the image.
+	int fontAscent;
+	int fontDescent;
+	int defaultHorizAdv;
 	NSVGshape* shapes;			// Linked list of shapes in the image.
 } NSVGimage;
 
@@ -456,7 +459,6 @@ typedef struct NSVGparser
 	char defsFlag;
 	char *unicodeFlag;
 	char *horizAdvFlag;
-	char *defaultHorizAdv;
 } NSVGparser;
 
 static void nsvg__xformIdentity(float* t)
@@ -982,7 +984,7 @@ static void nsvg__addShape(NSVGparser* p)
 				shape->horizAdvX = 0;
 		}
 		if (shape->horizAdvX == 0) {
-			shape->horizAdvX = p->defaultHorizAdv;
+			shape->horizAdvX = p->image->defaultHorizAdv;
 		}
 		p->unicodeFlag = NULL;
 		p->horizAdvFlag = NULL;
@@ -1880,10 +1882,17 @@ static void nsvg__parseAttribs(NSVGparser* p, const char** attr)
 		if (strcmp(attr[i], "style") == 0) {
 			nsvg__parseStyle(p, attr[i + 1]);
 		} else if (strcmp(attr[i], "horiz-adv-x") == 0) {
-			printf("Setting defualt horiz adv to %s\n", attr[i + 1]);
-			p->defaultHorizAdv = strtol(attr[i+1], &end, 10);
-			if (end == p->defaultHorizAdv)
-				p->defaultHorizAdv = 0;
+			p->image->defaultHorizAdv = strtol(attr[i+1], &end, 10);
+			if (end == attr[i+1])
+				p->image->defaultHorizAdv = 0;
+		} else if (strcmp(attr[i], "ascent") == 0) {
+			p->image->fontAscent = strtol(attr[i+1], &end, 10);
+			if (end == attr[i+1])
+				p->image->fontAscent = 0;
+		} else if (strcmp(attr[i], "descent") == 0) {
+			p->image->fontDescent = strtol(attr[i+1], &end, 10);
+			if (end == attr[i+1])
+				p->image->fontDescent = 0;
 		} else {
 			nsvg__parseAttr(p, attr[i], attr[i + 1]);
 		}
@@ -2746,11 +2755,10 @@ static void nsvg__startElement(void* ud, const char* el, const char** attr)
 		} else if (strcmp(el, "font") == 0) { // fonts are special "g" tags
 			nsvg__pushAttr(p);
 			nsvg__parseAttribs(p, attr);
+		} else if (strcmp(el, "font-face") == 0) { // for the default character width
+			nsvg__pushAttr(p);
+			nsvg__parseAttribs(p, attr);
 		}
-		// } else if (strcmp(el, "missing-glyph") == 0) { // for the default character width
-		// 	nsvg__pushAttr(p);
-		// 	nsvg__parseAttribs(p, attr);
-		// }
 		return;
 	}
 
@@ -2955,7 +2963,7 @@ NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 {
 	NSVGshape *shape = NULL;
 	NSVGpath *path = NULL;
-	NSVGshape **shapes = malloc(sizeof(NSVGshape*)*textLen); // array of paths, text to render
+	NSVGshape **ret = malloc(sizeof(NSVGshape*)*textLen); // array of paths, text to render
 	int i;
 
 	// make list of paths representing glyphs to render
@@ -2964,15 +2972,16 @@ NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 		for (shape = image->shapes; shape != NULL; shape = shape->next) {
 			if (!(shape->flags & NSVG_FLAGS_VISIBLE))
 				continue;
-			if (shape->unicode)
-			if (shape->unicode[0] == text[i]) {
-				shapes[i] = shape;
-				break;
+			if (shape->unicode && shape->unicode[0] == text[i]) {
+				ret[i] = shape;
+				goto found;
 			}
 		}
+found:
+		continue;
 	}
 
-	return shapes;
+	return ret;
 }
 
 NSVGimage* nsvgParse(char* input, const char* units, float dpi)

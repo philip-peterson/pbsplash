@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <tfblib/tfblib.h>
 #include <tfblib/tfb_colors.h>
 
@@ -9,10 +11,11 @@
 #define NANOSVG_ALL_COLOR_KEYWORDS // Include full list of color keywords.
 #define NANOSVG_IMPLEMENTATION     // Expands implementation
 #include "nanosvg.h"
-
-#include "logo.h"
+#define NANOSVGRAST_IMPLEMENTATION
+#include "nanosvgrast.h"
 
 #define MSG_MAX_LEN 4096
+#define FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 
 int usage()
 {
@@ -56,7 +59,7 @@ static void vertex2f(float x, float y, bool reset)
    }
 
    if (!first)
-      tfb_draw_line(x, y, x1, y1, tfb_green);
+      tfb_draw_line(x1, y1, x, y, tfb_green);
    else
       first = false;
 
@@ -104,36 +107,70 @@ static void cubicBez(float x1, float y1, float x2, float y2,
 static void drawPath(float *pts, int npts, int xoff, int yoff, float scale_x, float scale_y, char closed, float tol)
 {
    int i;
-   vertex2f(xoff + pts[0] * scale_x, yoff + pts[1] * scale_y, true);
+   vertex2f(xoff + pts[0] * scale_x, yoff - pts[1] * scale_y, true);
    for (i = 0; i < npts-1; i += 3) {
       float* p = &pts[i*2];
       // fprintf(stdout, "ptx0: %f, pty0: %f, ptx1: %f, pty1: %f, ptx2: %f, pty2: %f, ptx3: %f, pty3: %f\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
-      cubicBez(xoff + p[0] * scale_x, yoff + p[1] * scale_y, xoff + p[2] * scale_x, yoff + p[3] * scale_y, xoff + p[4] * scale_x, yoff + p[5] * scale_y, xoff + p[6] * scale_x, yoff + p[7] * scale_y, tol, 0);
+      cubicBez(xoff + p[0] * scale_x, yoff - p[1] * scale_y, xoff + p[2] * scale_x, yoff - p[3] * scale_y, xoff + p[4] * scale_x, yoff - p[5] * scale_y, xoff + p[6] * scale_x, yoff - p[7] * scale_y, tol, 0);
    }
 
    if (closed) {
-      vertex2f(xoff + pts[0] * scale_x, yoff + pts[1] * scale_y, false);
+      vertex2f(xoff + pts[0] * scale_x, yoff - pts[1] * scale_y, false);
    }
 }
 
 // Blit an SVG to the framebuffer using tfblib. The image is
 // scaled based on the target width and height.
-static void blit_svg(struct NSVGimage *image, int x, int y, int width, int height)
+static void draw_svg(NSVGimage *image, int x, int y, int width, int height)
 {
-   struct NSVGshape *shape;
-   struct NSVGpath *path;
    fprintf(stdout, "size: %f x %f\n", image->width, image->height);
-   float sz_x = (float)width / image->width;
-   float sz_y = (float)height / image->height;
-   fprintf(stdout, "scale: %f x %f\n", sz_x, sz_y);
+   float sz = (float)width / image->width;
+   int w = image->width * sz + 0.5;
+   int h = image->height * sz + 0.5;
+   fprintf(stdout, "scale: %f\n", sz);
 
-   for (shape = image->shapes; shape != NULL; shape = shape->next)
+   NSVGrasterizer *rast = nsvgCreateRasterizer();
+   unsigned char *img = malloc(w * h * 4);
+   nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
+
+   for (size_t i = 0; i < w; i++)
    {
-      for (path = shape->paths; path != NULL; path = path->next)
+      for (size_t j = 0; j < h; j++)
       {
-         drawPath(path->pts, path->npts, x, y, sz_x, sz_y, path->closed, 0.1f);
+         unsigned int col = tfb_make_color(img[(j * w + i) * 4 + 0], img[(j * w + i) * 4 + 1], img[(j * w + i) * 4 + 2]);
+         tfb_draw_pixel(x + i, y + j, col);
       }
    }
+
+   free(img);
+}
+
+static void draw_text(NSVGimage *font, char *text, int x, int y, float scale)
+{
+   int width, height = 200;
+   printf("text: %s\n", text);
+   NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
+   for (size_t i = 0; i < strlen(text); i++)
+   {
+      width += shapes[i]->horizAdvX * scale + 1;
+   }
+   unsigned char *img = malloc(width * height * 4);
+   NSVGrasterizer *rast = nsvgCreateRasterizer();
+
+   printf("text dimensions: %d x %d\n", width, height);
+
+   nsvgRasterize(rast, font, 0, 0, scale, img, width, height, width * 4);
+
+   for (size_t i = 0; i < width; i++)
+   {
+      for (size_t j = 0; j < height; j++)
+      {
+         unsigned int col = tfb_make_color(img[(j * width + i) * 4 + 0], img[(j * width + i) * 4 + 1], img[(j * width + i) * 4 + 2]);
+         tfb_draw_pixel(x + i, y - j, col);
+      }
+   }
+
+   free(img);
 }
 
 int main(int argc, char **argv)
@@ -142,7 +179,8 @@ int main(int argc, char **argv)
    int opt;
    char *message = calloc(MSG_MAX_LEN, 1);
    char *splash_image;
-   struct NSVGimage *image;
+   NSVGimage *image;
+   NSVGimage *font;
 
    for (int i = 1; i < argc; i++)
    {
@@ -153,7 +191,7 @@ int main(int argc, char **argv)
          goto out;
       }
 
-      if (strcmp(argv[i], "-s") == 0)
+      if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
       {
          splash_image = argv[i + 1];
          printf("splash_image path: %s\n", splash_image);
@@ -188,17 +226,31 @@ int main(int argc, char **argv)
 
    int w = (int)tfb_screen_width();
    int h = (int)tfb_screen_height();
-   float sz = (float)(w < h ? w : h) * 0.6f;
+   float sz = (float)(w < h ? w : h) * 0.5f;
    fprintf(stdout, "w=%du, h=%du\n", w, h);
    float x = (float)w / 2 - sz / 2;
    float y = (float)h / 2 - sz / 2 - 300;
    fprintf(stdout, "x=%f, y=%f, sz=%f\n", x, y, sz);
 
    image = nsvgParseFromFile(splash_image, "px", 96);
+   if (!image)
+   {
+      fprintf(stderr, "failed to load SVG image\n");
+      rc = 1;
+      goto out;
+   }
+   font = nsvgParseFromFile(FONT_PATH, "px", 500);
+   if (!font || !font->shapes)
+   {
+      fprintf(stderr, "failed to load SVG font\n");
+      rc = 1;
+      goto out; 
+   }
+   float fontsz = 0.05f;
+   fprintf(stdout, "font size: %f\n", fontsz);
 
    /* Paint the whole screen in black */
    tfb_clear_screen(tfb_black);
-   /* Draw a red rectangle at the center of the screen */
    /* Draw some text on-screen */
    tfb_draw_string_scaled(x + 75, y + sz + 40, tfb_white, tfb_black, 4, 4, "postmarketOS");
 
@@ -207,7 +259,9 @@ int main(int argc, char **argv)
       tfb_draw_string_scaled_wrapped(50, (int)((float)h * 0.6), tfb_white, tfb_black, 2, 2, 80, message);
    }
 
-   blit_svg(image, x, y, sz, sz);
+   draw_svg(image, x, y, sz, sz);
+
+   draw_text(font, "postmarketOS", 100, h / 2.f + 100, fontsz);
 
    tfb_flush_window();
    tfb_flush_fb();

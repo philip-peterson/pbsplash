@@ -151,6 +151,8 @@ typedef struct NSVGshape
 	char fillRule;				// Fill rule, see NSVGfillRule.
 	unsigned char flags;		// Logical or of NSVG_FLAGS_* flags
 	float bounds[4];			// Tight bounding box of the shape [minx,miny,maxx,maxy].
+	char *unicode;				// Unicode character code.
+	int horizAdvX;				// Horizontal distance to advance after rendering glyph.
 	NSVGpath* paths;			// Linked list of paths in the image.
 	struct NSVGshape* next;		// Pointer to next shape, or NULL if last element.
 } NSVGshape;
@@ -452,6 +454,9 @@ typedef struct NSVGparser
 	float dpi;
 	char pathFlag;
 	char defsFlag;
+	char *unicodeFlag;
+	char *horizAdvFlag;
+	char *defaultHorizAdv;
 } NSVGparser;
 
 static void nsvg__xformIdentity(float* t)
@@ -945,6 +950,7 @@ static void nsvg__addShape(NSVGparser* p)
 	NSVGattrib* attr = nsvg__getAttr(p);
 	float scale = 1.0f;
 	NSVGshape* shape;
+	char *end;
 	NSVGpath* path;
 	int i;
 
@@ -967,6 +973,20 @@ static void nsvg__addShape(NSVGparser* p)
 	shape->miterLimit = attr->miterLimit;
 	shape->fillRule = attr->fillRule;
 	shape->opacity = attr->opacity;
+
+	if (p->unicodeFlag) {
+		shape->unicode = p->unicodeFlag;
+		if (p->horizAdvFlag) {
+			shape->horizAdvX = strtol(p->horizAdvFlag, &end, 10);
+			if (end == p->horizAdvFlag)
+				shape->horizAdvX = 0;
+		}
+		if (shape->horizAdvX == 0) {
+			shape->horizAdvX = p->defaultHorizAdv;
+		}
+		p->unicodeFlag = NULL;
+		p->horizAdvFlag = NULL;
+	}
 
 	shape->paths = p->plist;
 	p->plist = NULL;
@@ -1854,12 +1874,19 @@ static void nsvg__parseStyle(NSVGparser* p, const char* str)
 static void nsvg__parseAttribs(NSVGparser* p, const char** attr)
 {
 	int i;
+	char *end;
 	for (i = 0; attr[i]; i += 2)
 	{
-		if (strcmp(attr[i], "style") == 0)
+		if (strcmp(attr[i], "style") == 0) {
 			nsvg__parseStyle(p, attr[i + 1]);
-		else
+		} else if (strcmp(attr[i], "horiz-adv-x") == 0) {
+			printf("Setting defualt horiz adv to %s\n", attr[i + 1]);
+			p->defaultHorizAdv = strtol(attr[i+1], &end, 10);
+			if (end == p->defaultHorizAdv)
+				p->defaultHorizAdv = 0;
+		} else {
 			nsvg__parseAttr(p, attr[i], attr[i + 1]);
+		}
 	}
 }
 
@@ -2218,6 +2245,11 @@ static void nsvg__parsePath(NSVGparser* p, const char** attr)
 	for (i = 0; attr[i]; i += 2) {
 		if (strcmp(attr[i], "d") == 0) {
 			s = attr[i + 1];
+		} else if (strcmp(attr[i], "unicode") == 0) {
+			p->unicodeFlag = malloc(strlen(attr[i+1]));
+			strcpy(p->unicodeFlag, attr[i+1]);
+		} else if (strcmp(attr[i], "horiz-adv-x") == 0) {
+			p->horizAdvFlag = attr[i+1];
 		} else {
 			tmp[0] = attr[i];
 			tmp[1] = attr[i + 1];
@@ -2698,14 +2730,27 @@ static void nsvg__startElement(void* ud, const char* el, const char** attr)
 	NSVGparser* p = (NSVGparser*)ud;
 
 	if (p->defsFlag) {
-		// Skip everything but gradients in defs
+		// Skip everything but gradients and fonts in defs
 		if (strcmp(el, "linearGradient") == 0) {
 			nsvg__parseGradient(p, attr, NSVG_PAINT_LINEAR_GRADIENT);
 		} else if (strcmp(el, "radialGradient") == 0) {
 			nsvg__parseGradient(p, attr, NSVG_PAINT_RADIAL_GRADIENT);
 		} else if (strcmp(el, "stop") == 0) {
 			nsvg__parseGradientStop(p, attr);
+		} else if (strcmp(el, "glyph") == 0) { // glyphs are just special paths
+			if (p->pathFlag)	// Do not allow nested paths.
+				return;
+			nsvg__pushAttr(p);
+			nsvg__parsePath(p, attr);
+			nsvg__popAttr(p);
+		} else if (strcmp(el, "font") == 0) { // fonts are special "g" tags
+			nsvg__pushAttr(p);
+			nsvg__parseAttribs(p, attr);
 		}
+		// } else if (strcmp(el, "missing-glyph") == 0) { // for the default character width
+		// 	nsvg__pushAttr(p);
+		// 	nsvg__parseAttribs(p, attr);
+		// }
 		return;
 	}
 
@@ -2904,6 +2949,30 @@ static void nsvg__scaleToViewbox(NSVGparser* p, const char* units)
 		for (i = 0; i < shape->strokeDashCount; i++)
 			shape->strokeDashArray[i] *= avgs;
 	}
+}
+
+NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
+{
+	NSVGshape *shape = NULL;
+	NSVGpath *path = NULL;
+	NSVGshape **shapes = malloc(sizeof(NSVGshape*)*textLen); // array of paths, text to render
+	int i;
+
+	// make list of paths representing glyphs to render
+	for (i = 0; i < textLen; i++)
+	{
+		for (shape = image->shapes; shape != NULL; shape = shape->next) {
+			if (!(shape->flags & NSVG_FLAGS_VISIBLE))
+				continue;
+			if (shape->unicode)
+			if (shape->unicode[0] == text[i]) {
+				shapes[i] = shape;
+				break;
+			}
+		}
+	}
+
+	return shapes;
 }
 
 NSVGimage* nsvgParse(char* input, const char* units, float dpi)

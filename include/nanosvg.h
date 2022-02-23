@@ -151,12 +151,12 @@ typedef struct NSVGshape
 	char fillRule;				// Fill rule, see NSVGfillRule.
 	unsigned char flags;		// Logical or of NSVG_FLAGS_* flags
 	float bounds[4];			// Tight bounding box of the shape [minx,miny,maxx,maxy].
-	char *unicode;				// Unicode character code.
+	const char *unicode;				// Unicode character code.
 	int horizAdvX;				// Horizontal distance to advance after rendering glyph.
 	NSVGpath* paths;			// Linked list of paths in the image.
 	struct NSVGshape* next;		// Pointer to next shape, or NULL if last element.
 } NSVGshape;
-
+ 
 typedef struct NSVGimage
 {
 	float width;				// Width of the image.
@@ -458,7 +458,7 @@ typedef struct NSVGparser
 	char pathFlag;
 	char defsFlag;
 	char *unicodeFlag;
-	char *horizAdvFlag;
+	const char *horizAdvFlag;
 } NSVGparser;
 
 static void nsvg__xformIdentity(float* t)
@@ -2962,7 +2962,6 @@ static void nsvg__scaleToViewbox(NSVGparser* p, const char* units)
 NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 {
 	NSVGshape *shape = NULL;
-	NSVGpath *path = NULL;
 	NSVGshape **ret = malloc(sizeof(NSVGshape*)*textLen); // array of paths, text to render
 	int i;
 

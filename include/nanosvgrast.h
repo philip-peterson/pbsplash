@@ -1386,8 +1386,9 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 		}
 	}
 
-	for (i = 0; i < h; i++)
+	for (i = 0; i < h; i++) {
 		memset(&dst[i*stride], 0, w*4);
+	}
 
 	for (i = 0; i < textLen; i++) {
 		shape = shapes[i];

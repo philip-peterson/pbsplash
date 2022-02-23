@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -16,116 +17,42 @@
 
 #define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
+#define LOGO_SIZE_MAX_MM 90
+#define FONT_SIZE_MM 5
+
+volatile sig_atomic_t terminate = 0;
+
+bool debug = false;
+
+#define LOG(fmt, ...) do { if (debug) fprintf(stdout, fmt, ##__VA_ARGS__); } while (0)
 
 int usage()
 {
    fprintf(stderr, "pbsplash: a simple fbsplash tool\n");
    fprintf(stderr, "--------------------------------\n");
-   fprintf(stderr, "pbsplash [-h] [-f font] [-s splash image] [-m message]\n\n");
+   fprintf(stderr, "pbsplash [-h] [-d] [-f font] [-s splash image] [-m message]\n\n");
+   fprintf(stderr, "    -v          enable verbose logging\n");
    fprintf(stderr, "    -h          show this help\n");
-   fpritnf(stderr, "    -f          path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
+   fprintf(stderr, "    -f          path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
    fprintf(stderr, "    -s          path to splash image to display\n");
    fprintf(stderr, "    -m          message to show under the splash image\n");
 
    return 1;
 }
 
-static float distPtSeg(float x, float y, float px, float py, float qx, float qy)
+void term(int signum)
 {
-	float pqx, pqy, dx, dy, d, t;
-	pqx = qx-px;
-	pqy = qy-py;
-	dx = x-px;
-	dy = y-py;
-	d = pqx*pqx + pqy*pqy;
-	t = pqx*dx + pqy*dy;
-	if (d > 0) t /= d;
-	if (t < 0) t = 0;
-	else if (t > 1) t = 1;
-	dx = px + t*pqx - x;
-	dy = py + t*pqy - y;
-	return dx*dx + dy*dy;
+   printf("Caught\n");
+   terminate = 1;
 }
 
-static void vertex2f(float x, float y, bool reset)
-{
-   static float x1 = 0.0f;
-   static float y1 = 0.0f;
-   static bool first = true;
-
-   if (reset) {
-      x1 = 0.0f;
-      x1 = 0.0f;
-      first = true;
-   }
-
-   if (!first)
-      tfb_draw_line(x1, y1, x, y, tfb_green);
-   else
-      first = false;
-
-   x1 = x;
-   y1 = y;
-}
-
-static void cubicBez(float x1, float y1, float x2, float y2,
-                     float x3, float y3, float x4, float y4,
-                     float tol, int level)
-{
-   float x12, y12, x23, y23, x34, y34, x123, y123, x234, y234, x1234, y1234;
-   float d;
-
-   if (level > 25) {
-      fprintf(stdout, "error: max subdivision level reached\n");
-      return;
-   }
-
-   x12 = (x1 + x2) * 0.5f;
-   y12 = (y1 + y2) * 0.5f;
-   x23 = (x2 + x3) * 0.5f;
-   y23 = (y2 + y3) * 0.5f;
-   x34 = (x3 + x4) * 0.5f;
-   y34 = (y3 + y4) * 0.5f;
-   x123 = (x12 + x23) * 0.5f;
-   y123 = (y12 + y23) * 0.5f;
-   x234 = (x23 + x34) * 0.5f;
-   y234 = (y23 + y34) * 0.5f;
-   x1234 = (x123 + x234) * 0.5f;
-   y1234 = (y123 + y234) * 0.5f;
-
-   d = distPtSeg(x1234, y1234, x1, y1, x4, y4);
-   if (d > tol * tol)
-   {
-      cubicBez(x1, y1, x12, y12, x123, y123, x1234, y1234, tol, level + 1);
-      cubicBez(x1234, y1234, x234, y234, x34, y34, x4, y4, tol, level + 1);
-   }
-   else
-   {
-      vertex2f(x4, y4, false);
-   }
-}
-
-static void drawPath(float *pts, int npts, int xoff, int yoff, float scale_x, float scale_y, char closed, float tol)
-{
-   int i;
-   vertex2f(xoff + pts[0] * scale_x, yoff - pts[1] * scale_y, true);
-   for (i = 0; i < npts-1; i += 3) {
-      float* p = &pts[i*2];
-      // fprintf(stdout, "ptx0: %f, pty0: %f, ptx1: %f, pty1: %f, ptx2: %f, pty2: %f, ptx3: %f, pty3: %f\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
-      cubicBez(xoff + p[0] * scale_x, yoff - p[1] * scale_y, xoff + p[2] * scale_x, yoff - p[3] * scale_y, xoff + p[4] * scale_x, yoff - p[5] * scale_y, xoff + p[6] * scale_x, yoff - p[7] * scale_y, tol, 0);
-   }
-
-   if (closed) {
-      vertex2f(xoff + pts[0] * scale_x, yoff - pts[1] * scale_y, false);
-   }
-}
 
 // Blit an SVG to the framebuffer using tfblib. The image is
 // scaled based on the target width and height.
-static void draw_svg(NSVGimage *image, int x, int y, int width, int height)
+static void draw_svg(NSVGimage *image, int x, int y, int largest_bound)
 {
    //fprintf(stdout, "size: %f x %f\n", image->width, image->height);
-   float sz = (float)width / image->width;
+   float sz = (float)largest_bound / (image->width > image->height ? image->width : image->height);
    int w = image->width * sz + 0.5;
    int h = image->height * sz + 0.5;
    //fprintf(stdout, "scale: %f\n", sz);
@@ -146,14 +73,23 @@ static void draw_svg(NSVGimage *image, int x, int y, int width, int height)
    free(img);
 }
 
+/**
+ * Get the dimensions of a string in pixels.
+ * based on the font size and the font SVG file.
+ */
 static void getTextDimensions(NSVGimage *font, char *text, float scale, int *width, int *height)
 {
    int i = 0;
 
    *width = 0;
+   // The height is simply the height of the font * the scale factor
    *height = (font->fontAscent - font->fontDescent) * scale;
+   if (text == NULL)
+      return;
+
    NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
-   for (size_t i = 0; i < strlen(text); i++)
+   // Iterate over every glyph in the string to get the total width
+   for (i = 0; i < strlen(text); i++)
    {
       NSVGshape *shape = shapes[i];
       if (shape) {
@@ -165,14 +101,13 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale, int *wid
    }
 }
 
-static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale)
+static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale, unsigned int tfb_col)
 {
-   //printf("text: %s, scale: %f, x: %d, y: %d\n", text, scale, x, y);
+   LOG("text '%s'\nfontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
+         scale, x, y, width, height);
    NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
    unsigned char *img = malloc(width * height * 4);
    NSVGrasterizer *rast = nsvgCreateRasterizer();
-
-   //printf("text dimensions: %d x %d\n", width, height); 
 
    nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
 
@@ -181,7 +116,8 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int 
       for (size_t j = 0; j < height; j++)
       {
          unsigned int col = tfb_make_color(img[(j * width + i) * 4 + 0], img[(j * width + i) * 4 + 1], img[(j * width + i) * 4 + 2]);
-         tfb_draw_pixel(x + i, y + height - j, col);
+         if (col != tfb_black)
+            tfb_draw_pixel(x + i, y + height - j, tfb_col);
       }
    }
 
@@ -192,13 +128,16 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int 
 int main(int argc, char **argv)
 {
    int rc = 0;
-   int opt;
-   char *message;
-   char *logoText = "postmarketOS";
-   char *splash_image;
+   char *message = NULL;
+   char *splash_image = NULL;
    NSVGimage *image;
    NSVGimage *font;
-   int textWidth, textHeight;
+   struct sigaction action;
+
+   memset(&action, 0, sizeof(action));
+   action.sa_handler = term;
+   sigaction(SIGTERM, &action, NULL);
+   sigaction(SIGINT, &action, NULL);
 
    for (int i = 1; i < argc; i++)
    {
@@ -206,6 +145,12 @@ int main(int argc, char **argv)
       {
          rc = usage();
          return rc;
+      }
+
+      if (strcmp(argv[i], "-v") == 0)
+      {
+         debug = true;
+         continue;
       }
 
       if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
@@ -218,12 +163,11 @@ int main(int argc, char **argv)
       if (strcmp(argv[i], "-m") == 0)
       {
          message = argv[i + 1];
-         printf("message: %s\n", message);
          continue;
       }
    }
 
-   if ((rc = tfb_acquire_fb(TFB_FL_NO_TTY_KD_GRAPHICS, "/dev/fb0", "/dev/tty1")) != TFB_SUCCESS)
+   if ((rc = tfb_acquire_fb(0, "/dev/fb0", "/dev/tty1")) != TFB_SUCCESS)
    {
       fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
       rc = 1;
@@ -232,11 +176,25 @@ int main(int argc, char **argv)
 
    int w = (int)tfb_screen_width();
    int h = (int)tfb_screen_height();
-   float sz = (float)(w < h ? w : h) * 0.5f;
-   //fprintf(stdout, "w=%du, h=%du\n", w, h);
-   float x = (float)w / 2 - sz / 2;
-   float y = (float)h / 2 - sz / 2 - 300;
-   //fprintf(stdout, "x=%f, y=%f, sz=%f\n", x, y, sz);
+
+   int w_mm = tfb_screen_width_mm();
+   int h_mm = tfb_screen_height_mm();
+   int pixels_per_milli = (float)w / (float)w_mm;
+
+   float logo_size_px = (float)(w < h ? w : h) * 0.75f;
+   if (w_mm > 0 && h_mm > 0) {
+      if (w_mm < h_mm) {
+         if (w_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
+            logo_size_px = (float)LOGO_SIZE_MAX_MM * pixels_per_milli;
+      } else {
+         if (h_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
+            logo_size_px = (float)LOGO_SIZE_MAX_MM * pixels_per_milli;
+      }
+   }
+
+   LOG("%dx%d @ %dx%dmm, logo_size_px=%f\n", w, h, w_mm, h_mm, logo_size_px);
+   float x = (float)w / 2 - logo_size_px / 2;
+   float y = (float)h / 2 - logo_size_px / 2;
 
    image = nsvgParseFromFile(splash_image, "px", 96);
    if (!image)
@@ -253,34 +211,37 @@ int main(int argc, char **argv)
       goto free_image;
    }
 
-   /* Paint the whole screen in black */
    tfb_clear_screen(tfb_black);
 
-   draw_svg(image, x, y, sz, sz);
+   draw_svg(image, x, y, logo_size_px);
 
-   float fontsz = (sz * 0.25) / (font->fontAscent - font->fontDescent);
-   //fprintf(stdout, "font size: %f\n", fontsz);
+   if (message) {
+      int textWidth, textHeight;
+      float fontsz = pixels_per_milli / (float)(font->fontAscent - font->fontDescent)
+         * FONT_SIZE_MM;
 
-   getTextDimensions(font, logoText, fontsz, &textWidth, &textHeight);
-   
-   draw_text(font, logoText, w / 2.f - textWidth / 2.f, y + sz + sz*0.2, textWidth, textHeight, fontsz);
+      getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
 
-   fontsz = (sz * 0.1) / (font->fontAscent - font->fontDescent);
+      int tx = w / 2.f - textWidth / 2.f;
+      int ty = y + logo_size_px * 0.5f + textHeight * 0.5f;
 
-   getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
-
-   draw_text(font, message, w / 2.f - textWidth / 2.f, y + sz * 2, textWidth, textHeight, fontsz);
-   printf("Rendered text: %s\n", message);
+      draw_text(font, message, tx, ty, textWidth, textHeight, fontsz, tfb_gray);
+   }
 
    tfb_flush_window();
    tfb_flush_fb();
+ 
+   while (!terminate)
+   {
+      sleep(1);
+   }
 
-   //sleep(20);
-out:
    nsvgDelete(font);
 free_image:
    nsvgDelete(image);
 release_fb:
+   // The TTY might end up in a weird state if this
+   // is not called!
    tfb_release_fb();
    return rc;
 }

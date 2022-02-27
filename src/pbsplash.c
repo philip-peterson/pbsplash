@@ -18,7 +18,8 @@
 #define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 #define LOGO_SIZE_MAX_MM 90
-#define FONT_SIZE_MM 5
+#define FONT_SIZE_PT 13
+#define PT_TO_MM 0.38f
 
 volatile sig_atomic_t terminate = 0;
 
@@ -28,14 +29,16 @@ bool debug = false;
 
 int usage()
 {
-   fprintf(stderr, "pbsplash: a simple fbsplash tool\n");
-   fprintf(stderr, "--------------------------------\n");
+   fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
+   fprintf(stderr, "-------------------------------------------\n");
    fprintf(stderr, "pbsplash [-h] [-d] [-f font] [-s splash image] [-m message]\n\n");
-   fprintf(stderr, "    -v          enable verbose logging\n");
-   fprintf(stderr, "    -h          show this help\n");
-   fprintf(stderr, "    -f          path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
-   fprintf(stderr, "    -s          path to splash image to display\n");
-   fprintf(stderr, "    -m          message to show under the splash image\n");
+   fprintf(stderr, "    -v|--verbose          enable verbose logging\n");
+   fprintf(stderr, "    -h|--help             show this help\n");
+   fprintf(stderr, "    -f|--font             path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
+   fprintf(stderr, "    -s|--splash-image     path to splash image to display\n");
+   fprintf(stderr, "    -m|--message          message to show under the splash image\n");
+   fprintf(stderr, "    -p|--font-size        font size in pt (default: %d)\n", FONT_SIZE_PT);
+   fprintf(stderr, "    -d|--dpi              custom DPI (for testing)\n");
 
    return 1;
 }
@@ -130,40 +133,57 @@ int main(int argc, char **argv)
    int rc = 0;
    char *message = NULL;
    char *splash_image = NULL;
+   char *font_path = DEFAULT_FONT_PATH;
    NSVGimage *image;
    NSVGimage *font;
    struct sigaction action;
+   float font_size = FONT_SIZE_PT;
+   int c;
+   long dpi = 0;
 
    memset(&action, 0, sizeof(action));
    action.sa_handler = term;
    sigaction(SIGTERM, &action, NULL);
    sigaction(SIGINT, &action, NULL);
 
-   for (int i = 1; i < argc; i++)
+   while ((c = getopt(argc, argv, "hvdf:s:m:p:d:")) != -1)
    {
-      if (strcmp(argv[i], "-h") == 0)
+      char *end = NULL;
+      switch (c)
       {
-         rc = usage();
-         return rc;
-      }
-
-      if (strcmp(argv[i], "-v") == 0)
-      {
+      case 'h':
+         return usage();
+      case 'v':
+      case 'd':
          debug = true;
-         continue;
-      }
-
-      if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
-      {
-         splash_image = argv[i + 1];
-         //printf("splash_image path: %s\n", splash_image);
-         continue;
-      }
-
-      if (strcmp(argv[i], "-m") == 0)
-      {
-         message = argv[i + 1];
-         continue;
+         break;
+      case 'f':
+         font_path = optarg;
+         break;
+      case 's':
+         splash_image = optarg;
+         break;
+      case 'm':
+         message = optarg;
+         break;
+      case 'p':
+         font_size = strtof(optarg, &end);
+         if (end == optarg)
+         {
+            fprintf(stderr, "Invalid font size: %s\n", optarg);
+            return usage();
+         }
+         break;
+      case 'd':
+         dpi = strtol(optarg, &end);
+         if (end == optarg)
+         {
+            fprintf(stderr, "Invalid font size: %s\n", optarg);
+            return usage();
+         }
+         break;
+      default:
+         return usage();
       }
    }
 
@@ -179,6 +199,15 @@ int main(int argc, char **argv)
 
    int w_mm = tfb_screen_width_mm();
    int h_mm = tfb_screen_height_mm();
+   // If DPI is specified on cmdline then calculate display size from it
+   // otherwise calculate the dpi based on the display size.
+   if (dpi > 0)
+   {
+      w_mm = w / (float)dpi * 25.4;
+      h_mm = h / (float)dpi * 25.4;
+   } else {
+      dpi = (float)w / (float)w_mm * 25.4;
+   }
    int pixels_per_milli = (float)w / (float)w_mm;
 
    float logo_size_px = (float)(w < h ? w : h) * 0.75f;
@@ -192,18 +221,18 @@ int main(int argc, char **argv)
       }
    }
 
-   LOG("%dx%d @ %dx%dmm, logo_size_px=%f\n", w, h, w_mm, h_mm, logo_size_px);
+   LOG("%dx%d @ %dx%dmm, spi=%ld, logo_size_px=%f\n", w, h, w_mm, h_mm, dpi, logo_size_px);
    float x = (float)w / 2 - logo_size_px / 2;
    float y = (float)h / 2 - logo_size_px / 2;
 
-   image = nsvgParseFromFile(splash_image, "px", 96);
+   image = nsvgParseFromFile(splash_image, "px", 500);
    if (!image)
    {
       fprintf(stderr, "failed to load SVG image\n");
       rc = 1;
       goto release_fb;
    }
-   font = nsvgParseFromFile(DEFAULT_FONT_PATH, "px", 500);
+   font = nsvgParseFromFile(font_path, "px", 500);
    if (!font || !font->shapes)
    {
       fprintf(stderr, "failed to load SVG font\n");
@@ -218,7 +247,7 @@ int main(int argc, char **argv)
    if (message) {
       int textWidth, textHeight;
       float fontsz = pixels_per_milli / (float)(font->fontAscent - font->fontDescent)
-         * FONT_SIZE_MM;
+         * (font_size * PT_TO_MM);
 
       getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
 

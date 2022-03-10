@@ -20,8 +20,9 @@
 #define LOGO_SIZE_MAX_MM 90
 #define FONT_SIZE_PT 13
 #define PT_TO_MM 0.38f
-
 #define TTY_PATH_LEN 11
+
+#define DEBUGRENDER 1
 
 volatile sig_atomic_t terminate = 0;
 
@@ -47,35 +48,31 @@ int usage()
 
 void term(int signum)
 {
-   printf("Caught\n");
    terminate = 1;
 }
 
 
 // Blit an SVG to the framebuffer using tfblib. The image is
 // scaled based on the target width and height.
-static void draw_svg(NSVGimage *image, int x, int y, int largest_bound)
+static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 {
-   //fprintf(stdout, "size: %f x %f\n", image->width, image->height);
-   // float sz = (float)largest_bound / (image->width > image->height ? image->width : image->height);
-   // int w = image->width * sz + 0.5;
-   // int h = image->height * sz + 0.5;
-   //fprintf(stdout, "scale: %f\n", sz);
-   int w = image->width;
-   int h = image->height;
-
+   float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
+   LOG("%f\n", sz);
+   //sz = 1.5;
    NSVGrasterizer *rast = nsvgCreateRasterizer();
    unsigned char *img = malloc(w * h * 4);
-   nsvgRasterize(rast, image, 0, 0, 1, img, w, h, w * 4);
+   nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
 
    for (size_t i = 0; i < w; i++)
    {
       for (size_t j = 0; j < h; j++)
       {
+#if DEBUGRENDER == 1
          if (i == 0 || i == w - 1 || j == 0 || j == h-1) {
             tfb_draw_pixel(x + i, y + h - j, tfb_red);
             continue;
          }
+#endif
          unsigned int col = tfb_make_color(img[(j * w + i) * 4 + 0], img[(j * w + i) * 4 + 1], img[(j * w + i) * 4 + 2]);
          tfb_draw_pixel(x + i, y + j, col);
       }
@@ -104,7 +101,7 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale, int *wid
    {
       NSVGshape *shape = shapes[i];
       if (shape) {
-         *width += shapes[i]->horizAdvX * scale + 1;
+         *width += (float)shapes[i]->horizAdvX * scale + 0.5;
       } else {
          *width += font->defaultHorizAdv * scale;
       }
@@ -114,7 +111,7 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale, int *wid
 
 static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale, unsigned int tfb_col)
 {
-   LOG("text '%s'\nfontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
+   LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
          scale, x, y, width, height);
    NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
    unsigned char *img = malloc(width * height * 4);
@@ -126,10 +123,12 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int 
    {
       for (size_t j = 0; j < height; j++)
       {
+#if DEBUGRENDER == 1
          if (i == 0 || i == width - 1 || j == 0 || j == height-1) {
             tfb_draw_pixel(x + i, y + height - j, tfb_red);
             continue;
          }
+#endif
          unsigned int col = tfb_make_color(img[(j * width + i) * 4 + 0], img[(j * width + i) * 4 + 1], img[(j * width + i) * 4 + 2]);
          if (col != tfb_black)
             tfb_draw_pixel(x + i, y + height - j, tfb_col);
@@ -146,12 +145,12 @@ int main(int argc, char **argv)
    char *message = NULL;
    char *splash_image = NULL;
    char *font_path = DEFAULT_FONT_PATH;
-   char active_tty[TTY_PATH_LEN];
+   char active_tty[TTY_PATH_LEN + 5];
    NSVGimage *image;
    NSVGimage *font;
    struct sigaction action;
    float font_size = FONT_SIZE_PT;
-   int c;
+   int optflag;
    long dpi = 0;
 
    memset(active_tty, '\0', TTY_PATH_LEN);
@@ -163,15 +162,14 @@ int main(int argc, char **argv)
    sigaction(SIGTERM, &action, NULL);
    sigaction(SIGINT, &action, NULL);
 
-   while ((c = getopt(argc, argv, "hvdf:s:m:p:d:")) != -1)
+   while ((optflag = getopt(argc, argv, "hvf:s:m:p:d:")) != -1)
    {
       char *end = NULL;
-      switch (c)
+      switch (optflag)
       {
       case 'h':
          return usage();
       case 'v':
-         printf("DEBUGGING");
          debug = true;
          break;
       case 'f':
@@ -211,14 +209,14 @@ int main(int argc, char **argv)
 
    {
       FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
-      char c;
+      char ch;
       if(fp != NULL)
       {
-         while((c = getc(fp)) != EOF && strlen(active_tty) < TTY_PATH_LEN)
+         while((ch = getc(fp)) != EOF && strlen(active_tty) < TTY_PATH_LEN)
          {
-            if (c == '\n')
+            if (ch == '\n')
                break;
-            strcat(active_tty, &c);
+            strcat(active_tty, &ch);
          }
          fclose(fp);
       }
@@ -260,58 +258,62 @@ int main(int argc, char **argv)
       }
    }
 
-   LOG("%dx%d @ %dx%dmm, spi=%ld, logo_size_px=%f\n", w, h, w_mm, h_mm, dpi, logo_size_px);
-   float x = (float)w / 2 - logo_size_px / 2;
-   float y = (float)h / 2 - logo_size_px / 2;
+   LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", w, h, w_mm, h_mm, dpi, logo_size_px);
 
    image = nsvgParseFromFile(splash_image, "px", logo_size_px);
    if (!image)
    {
       fprintf(stderr, "failed to load SVG image\n");
       rc = 1;
-      goto release_fb;
+      goto out;
    }
+
+   float sz = (float)logo_size_px / (image->width > image->height ? image->width : image->height);
+   int image_w = image->width * sz + 0.5;
+   int image_h = image->height * sz + 0.5;
+   float x = (float)w / 2;
+   float y = (float)h / 2;
+   // Center the image
+   x -= image_w * 0.5f;
+   y -= image_h * 0.5f;
 
    tfb_clear_screen(tfb_black);
 
-   draw_svg(image, x, y, logo_size_px);
+   draw_svg(image, x, y, image_w, image_h);
 
    if (message) {
       int textWidth, textHeight;
-      // float fontsz = pixels_per_milli / (float)(font->fontAscent - font->fontDescent)
-      //    * (font_size * PT_TO_MM);
 
-      font = nsvgParseFromFile(font_path, "mm", (font_size * PT_TO_MM));
+      font = nsvgParseFromFile(font_path, "px", 512);
       if (!font || !font->shapes)
       {
          fprintf(stderr, "failed to load SVG font\n");
          rc = 1;
-         goto free_image;
+         goto out;
       }
 
-      getTextDimensions(font, message, 1 /*fontsz*/, &textWidth, &textHeight);
+      float fontsz = ((float)font_size * PT_TO_MM) / (font->fontAscent - font->fontDescent) * pixels_per_milli;
+
+      //fontsz = 0.1;
+
+      getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
 
       int tx = w / 2.f - textWidth / 2.f;
-      int ty = y + logo_size_px * 0.5f + textHeight * 0.5f;
+      int ty = y + image_h + textHeight * 0.5f;
 
-      draw_text(font, message, tx, ty, textWidth, textHeight, 1/*fontsz*/, tfb_gray);
+      draw_text(font, message, tx, ty, textWidth, textHeight, fontsz, tfb_gray);
    }
 
    tfb_flush_window();
    tfb_flush_fb();
-   // FIXME::: THERE IS A SEGFAULT IN CLEANUP
-   tfb_release_fb();
-   return 0;
    while (!terminate)
    {
       sleep(1);
    }
-   // beweare a segfault lies here (don't run on PC!!!!!!!!)
-   if (font)
-      nsvgDelete(font);
-free_image:
+
+out:
+   nsvgDelete(font);
    nsvgDelete(image);
-release_fb:
    // The TTY might end up in a weird state if this
    // is not called!
    tfb_release_fb();

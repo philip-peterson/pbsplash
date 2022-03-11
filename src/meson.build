@@ -1,5 +1,6 @@
 src = [
         'pbsplash.c',
+        'animate.c',
 ]
 
 executable('pbsplash', src,

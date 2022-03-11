@@ -10,6 +10,8 @@
                 "vector": "c",
                 "string_view": "c",
                 "initializer_list": "c",
-                "valarray": "c"
+                "valarray": "c",
+                "random": "c",
+                "nanosvgrast.h": "c"
         }
 }

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -15,6 +16,8 @@
 #define NANOSVGRAST_IMPLEMENTATION
 #include "nanosvgrast.h"
 
+#include "pbsplash.h"
+
 #define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 #define LOGO_SIZE_MAX_MM 90
@@ -22,11 +25,12 @@
 #define PT_TO_MM 0.38f
 #define TTY_PATH_LEN 11
 
-#define DEBUGRENDER 1
+#define DEBUGRENDER 0
 
 volatile sig_atomic_t terminate = 0;
 
 bool debug = true;
+struct col background_color = {.r = 0, .g = 0, .b = 0, .a = 255};
 
 #define LOG(fmt, ...) do { if (debug) fprintf(stdout, fmt, ##__VA_ARGS__); } while (0)
 
@@ -51,18 +55,10 @@ void term(int signum)
    terminate = 1;
 }
 
-
-// Blit an SVG to the framebuffer using tfblib. The image is
-// scaled based on the target width and height.
-static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
+static void blit_buf(unsigned char* buf, int x, int y, int w, int h, bool vflip, bool redraw)
 {
-   float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
-   LOG("%f\n", sz);
-   //sz = 1.5;
-   NSVGrasterizer *rast = nsvgCreateRasterizer();
-   unsigned char *img = malloc(w * h * 4);
-   nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
-
+   unsigned int bg_col = tfb_make_color(background_color.r, background_color.g, background_color.b);
+   unsigned int col;
    for (size_t i = 0; i < w; i++)
    {
       for (size_t j = 0; j < h; j++)
@@ -73,15 +69,59 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
             continue;
          }
 #endif
-         unsigned int col = tfb_make_color(img[(j * w + i) * 4 + 0], img[(j * w + i) * 4 + 1], img[(j * w + i) * 4 + 2]);
-         tfb_draw_pixel(x + i, y + j, col);
+         struct col rgba = *(struct col *)(buf + (j * w + i) * 4);
+         if (!redraw && rgba.a == 0)
+            continue;
+
+         if (redraw && rgba.a == 0) {
+            col = bg_col;
+         } else {
+            rgba.r = (rgba.r * rgba.a + background_color.r * (255 - rgba.a)) >> 8;
+            rgba.g = (rgba.g * rgba.a + background_color.g * (255 - rgba.a)) >> 8;
+            rgba.b = (rgba.b * rgba.a + background_color.b * (255 - rgba.a)) >> 8;
+            col = tfb_make_color(rgba.r, rgba.g, rgba.b);
+         }
+         if (vflip)
+            tfb_draw_pixel(x + i, y + h - j, col);
+         else
+            tfb_draw_pixel(x + i, y + j, col);
       }
    }
-
-   free(img);
 }
 
-/**
+static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
+{
+   float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
+   LOG("draw_svg: %dx%d, %dx%d, %f\n", x, y, w, h, sz);
+   //sz = 1.5;
+   NSVGrasterizer *rast = nsvgCreateRasterizer();
+   unsigned char *img = malloc(w * h * 4);
+   nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
+
+   blit_buf(img, x, y, w, h, false, false);
+
+   free(img);
+   nsvgDeleteRasterizer(rast);
+}
+
+static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale, unsigned int tfb_col)
+{
+   LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
+         scale, x, y, width, height);
+   NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
+   unsigned char *img = malloc(width * height * 4);
+   NSVGrasterizer *rast = nsvgCreateRasterizer();
+
+   nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
+
+   blit_buf(img, x, y, width, height, true, false);
+
+   free(img);
+   free(shapes);
+   nsvgDeleteRasterizer(rast);
+}
+
+/*
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
  */
@@ -105,37 +145,8 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale, int *wid
       } else {
          *width += font->defaultHorizAdv * scale;
       }
-      
-   }
-}
-
-static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale, unsigned int tfb_col)
-{
-   LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
-         scale, x, y, width, height);
-   NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
-   unsigned char *img = malloc(width * height * 4);
-   NSVGrasterizer *rast = nsvgCreateRasterizer();
-
-   nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
-
-   for (size_t i = 0; i < width; i++)
-   {
-      for (size_t j = 0; j < height; j++)
-      {
-#if DEBUGRENDER == 1
-         if (i == 0 || i == width - 1 || j == 0 || j == height-1) {
-            tfb_draw_pixel(x + i, y + height - j, tfb_red);
-            continue;
-         }
-#endif
-         unsigned int col = tfb_make_color(img[(j * width + i) * 4 + 0], img[(j * width + i) * 4 + 1], img[(j * width + i) * 4 + 2]);
-         if (col != tfb_black)
-            tfb_draw_pixel(x + i, y + height - j, tfb_col);
-      }
    }
 
-   free(img);
    free(shapes);
 }
 
@@ -145,7 +156,7 @@ int main(int argc, char **argv)
    char *message = NULL;
    char *splash_image = NULL;
    char *font_path = DEFAULT_FONT_PATH;
-   char active_tty[TTY_PATH_LEN + 5];
+   char active_tty[TTY_PATH_LEN + 1];
    NSVGimage *image;
    NSVGimage *font;
    struct sigaction action;
@@ -208,23 +219,20 @@ int main(int argc, char **argv)
    }
 
    {
-      FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
-      char ch;
-      if(fp != NULL)
-      {
-         while((ch = getc(fp)) != EOF && strlen(active_tty) < TTY_PATH_LEN)
-         {
-            if (ch == '\n')
-               break;
-            strcat(active_tty, &ch);
-         }
-         fclose(fp);
-      }
+   FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
+   int len = strlen(active_tty);
+   char *ptr = active_tty + len;
+   if(fp != NULL)
+   {
+      fgets(ptr, TTY_PATH_LEN - len, fp);
+      *(ptr + strlen(ptr) - 1) = '\0';
+      fclose(fp);
+   }
    }
 
    LOG("active tty: '%s'\n", active_tty);
 
-   if ((rc = tfb_acquire_fb(0, "/dev/fb0", active_tty)) != TFB_SUCCESS)
+   if ((rc = tfb_acquire_fb(/*TFB_FL_USE_DOUBLE_BUFFER*/ 0, "/dev/fb0", active_tty)) != TFB_SUCCESS)
    {
       fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
       rc = 1;
@@ -260,7 +268,7 @@ int main(int argc, char **argv)
 
    LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", w, h, w_mm, h_mm, dpi, logo_size_px);
 
-   image = nsvgParseFromFile(splash_image, "px", logo_size_px);
+   image = nsvgParseFromFile(splash_image, "", logo_size_px);
    if (!image)
    {
       fprintf(stderr, "failed to load SVG image\n");
@@ -277,7 +285,7 @@ int main(int argc, char **argv)
    x -= image_w * 0.5f;
    y -= image_h * 0.5f;
 
-   tfb_clear_screen(tfb_black);
+   tfb_clear_screen(tfb_make_color(background_color.r, background_color.g, background_color.b));
 
    draw_svg(image, x, y, image_w, image_h);
 
@@ -306,10 +314,21 @@ int main(int argc, char **argv)
 
    tfb_flush_window();
    tfb_flush_fb();
+#define ANIM_HEIGHT 600
+   //unsigned char* animation_buf = malloc(w * ANIM_HEIGHT * 4);
+   int frame = 0;
    while (!terminate)
    {
-      sleep(1);
+      //printf("FRAME: %d\n", frame);
+      animate_frame(frame++, w, y + image_h + 500);
+      //blit_buf(animation_buf, 0, y + image_h + 200, w, ANIM_HEIGHT, false, true);
+      //memset(animation_buf, 0, w * ANIM_HEIGHT * 4);
+      //tfb_flush_window();
+      tfb_flush_fb();
+      //usleep(1666);
    }
+
+   //free(animation_buf);
 
 out:
    nsvgDelete(font);

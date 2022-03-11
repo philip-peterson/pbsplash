@@ -71,6 +71,8 @@ extern "C" {
 	nsvgDelete(image);
 */
 
+#define NSVG_MAX_UNICODE_LEN 32
+
 enum NSVGpaintType {
 	NSVG_PAINT_NONE = 0,
 	NSVG_PAINT_COLOR = 1,
@@ -151,7 +153,7 @@ typedef struct NSVGshape
 	char fillRule;				// Fill rule, see NSVGfillRule.
 	unsigned char flags;		// Logical or of NSVG_FLAGS_* flags
 	float bounds[4];			// Tight bounding box of the shape [minx,miny,maxx,maxy].
-	const char *unicode;				// Unicode character code.
+	char unicode[NSVG_MAX_UNICODE_LEN];				// Unicode character code.
 	int horizAdvX;				// Horizontal distance to advance after rendering glyph.
 	NSVGpath* paths;			// Linked list of paths in the image.
 	struct NSVGshape* next;		// Pointer to next shape, or NULL if last element.
@@ -457,7 +459,7 @@ typedef struct NSVGparser
 	float dpi;
 	char pathFlag;
 	char defsFlag;
-	char *unicodeFlag;
+	char unicodeFlag[NSVG_MAX_UNICODE_LEN];
 	const char *horizAdvFlag;
 } NSVGparser;
 
@@ -977,7 +979,7 @@ static void nsvg__addShape(NSVGparser* p)
 	shape->opacity = attr->opacity;
 
 	if (p->unicodeFlag) {
-		shape->unicode = p->unicodeFlag;
+		strcat(shape->unicode, p->unicodeFlag);
 		if (p->horizAdvFlag) {
 			shape->horizAdvX = strtol(p->horizAdvFlag, &end, 10);
 			if (end == p->horizAdvFlag)
@@ -986,7 +988,7 @@ static void nsvg__addShape(NSVGparser* p)
 		if (shape->horizAdvX == 0) {
 			shape->horizAdvX = p->image->defaultHorizAdv;
 		}
-		p->unicodeFlag = NULL;
+		p->unicodeFlag[0] = '\0';
 		p->horizAdvFlag = NULL;
 	}
 
@@ -2254,8 +2256,8 @@ static void nsvg__parsePath(NSVGparser* p, const char** attr)
 	for (i = 0; attr[i]; i += 2) {
 		if (strcmp(attr[i], "d") == 0) {
 			s = attr[i + 1];
-		} else if (strcmp(attr[i], "unicode") == 0) {
-			p->unicodeFlag = malloc(strlen(attr[i+1]));
+		} else if (strcmp(attr[i], "unicode") == 0
+				&& strlen(attr[i+1]) < NSVG_MAX_UNICODE_LEN) {
 			strcpy(p->unicodeFlag, attr[i+1]);
 		} else if (strcmp(attr[i], "horiz-adv-x") == 0) {
 			p->horizAdvFlag = attr[i+1];
@@ -3032,7 +3034,7 @@ NSVGimage* nsvgParseFromFile(const char* filename, const char* units, float dpi)
 error:
 	if (fp) fclose(fp);
 	if (data) free(data);
-	if (image) nsvgDelete(image);
+	nsvgDelete(image);
 	return NULL;
 }
 

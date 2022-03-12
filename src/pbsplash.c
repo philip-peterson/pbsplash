@@ -4,6 +4,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/kd.h>
 #include <fcntl.h>
 #include <tfblib/tfblib.h>
 #include <tfblib/tfb_colors.h>
@@ -21,7 +23,7 @@
 #define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 #define LOGO_SIZE_MAX_MM 90
-#define FONT_SIZE_PT 13
+#define FONT_SIZE_PT 9
 #define PT_TO_MM 0.38f
 #define TTY_PATH_LEN 11
 
@@ -32,7 +34,12 @@ volatile sig_atomic_t terminate = 0;
 bool debug = true;
 struct col background_color = {.r = 0, .g = 0, .b = 0, .a = 255};
 
-#define LOG(fmt, ...) do { if (debug) fprintf(stdout, fmt, ##__VA_ARGS__); } while (0)
+#define LOG(fmt, ...)                         \
+   do                                         \
+   {                                          \
+      if (debug)                              \
+         fprintf(stdout, fmt, ##__VA_ARGS__); \
+   } while (0)
 
 int usage()
 {
@@ -55,30 +62,37 @@ void term(int signum)
    terminate = 1;
 }
 
-static void blit_buf(unsigned char* buf, int x, int y, int w, int h, bool vflip, bool redraw)
+static void blit_buf(unsigned char *buf, int x, int y, int w, int h, bool vflip, bool redraw)
 {
-   unsigned int bg_col = tfb_make_color(background_color.r, background_color.g, background_color.b);
-   unsigned int col;
+   struct col prev_col = {.r = 0, .g = 0, .b = 0, .a = 0};
+   unsigned int col = tfb_make_color(background_color.r, background_color.g, background_color.b);
+
    for (size_t i = 0; i < w; i++)
    {
       for (size_t j = 0; j < h; j++)
       {
 #if DEBUGRENDER == 1
-         if (i == 0 || i == w - 1 || j == 0 || j == h-1) {
+         if (i == 0 || i == w - 1 || j == 0 || j == h - 1)
+         {
             tfb_draw_pixel(x + i, y + h - j, tfb_red);
             continue;
          }
 #endif
          struct col rgba = *(struct col *)(buf + (j * w + i) * 4);
-         if (!redraw && rgba.a == 0)
+         if (rgba.a == 0 || rgba.rgba == background_color.rgba)
             continue;
 
-         if (redraw && rgba.a == 0) {
-            col = bg_col;
-         } else {
+         // Alpha blending
+         if (rgba.a != 255)
+         {
             rgba.r = (rgba.r * rgba.a + background_color.r * (255 - rgba.a)) >> 8;
             rgba.g = (rgba.g * rgba.a + background_color.g * (255 - rgba.a)) >> 8;
             rgba.b = (rgba.b * rgba.a + background_color.b * (255 - rgba.a)) >> 8;
+         }
+
+         // No need to generate the colour again if it's the same as the previous one
+         if (rgba.rgba != prev_col.rgba) {
+            prev_col.rgba = rgba.rgba;
             col = tfb_make_color(rgba.r, rgba.g, rgba.b);
          }
          if (vflip)
@@ -93,7 +107,6 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 {
    float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
    LOG("draw_svg: %dx%d, %dx%d, %f\n", x, y, w, h, sz);
-   //sz = 1.5;
    NSVGrasterizer *rast = nsvgCreateRasterizer();
    unsigned char *img = malloc(w * h * 4);
    nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
@@ -107,7 +120,7 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 static void draw_text(NSVGimage *font, char *text, int x, int y, int width, int height, float scale, unsigned int tfb_col)
 {
    LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
-         scale, x, y, width, height);
+       scale, x, y, width, height);
    NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
    unsigned char *img = malloc(width * height * 4);
    NSVGrasterizer *rast = nsvgCreateRasterizer();
@@ -140,9 +153,12 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale, int *wid
    for (i = 0; i < strlen(text); i++)
    {
       NSVGshape *shape = shapes[i];
-      if (shape) {
+      if (shape)
+      {
          *width += (float)shapes[i]->horizAdvX * scale + 0.5;
-      } else {
+      }
+      else
+      {
          *width += font->defaultHorizAdv * scale;
       }
    }
@@ -157,8 +173,8 @@ int main(int argc, char **argv)
    char *splash_image = NULL;
    char *font_path = DEFAULT_FONT_PATH;
    char active_tty[TTY_PATH_LEN + 1];
-   NSVGimage *image;
-   NSVGimage *font;
+   NSVGimage *image = NULL;
+   NSVGimage *font = NULL;
    struct sigaction action;
    float font_size = FONT_SIZE_PT;
    int optflag;
@@ -166,7 +182,6 @@ int main(int argc, char **argv)
 
    memset(active_tty, '\0', TTY_PATH_LEN);
    strcat(active_tty, "/dev/");
-
 
    memset(&action, 0, sizeof(action));
    action.sa_handler = term;
@@ -219,15 +234,15 @@ int main(int argc, char **argv)
    }
 
    {
-   FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
-   int len = strlen(active_tty);
-   char *ptr = active_tty + len;
-   if(fp != NULL)
-   {
-      fgets(ptr, TTY_PATH_LEN - len, fp);
-      *(ptr + strlen(ptr) - 1) = '\0';
-      fclose(fp);
-   }
+      FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
+      int len = strlen(active_tty);
+      char *ptr = active_tty + len;
+      if (fp != NULL)
+      {
+         fgets(ptr, TTY_PATH_LEN - len, fp);
+         *(ptr + strlen(ptr) - 1) = '\0';
+         fclose(fp);
+      }
    }
 
    LOG("active tty: '%s'\n", active_tty);
@@ -250,17 +265,23 @@ int main(int argc, char **argv)
    {
       w_mm = w / (float)dpi * 25.4;
       h_mm = h / (float)dpi * 25.4;
-   } else {
+   }
+   else
+   {
       dpi = (float)w / (float)w_mm * 25.4;
    }
    int pixels_per_milli = (float)w / (float)w_mm;
 
    float logo_size_px = (float)(w < h ? w : h) * 0.75f;
-   if (w_mm > 0 && h_mm > 0) {
-      if (w_mm < h_mm) {
+   if (w_mm > 0 && h_mm > 0)
+   {
+      if (w_mm < h_mm)
+      {
          if (w_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
             logo_size_px = (float)LOGO_SIZE_MAX_MM * pixels_per_milli;
-      } else {
+      }
+      else
+      {
          if (h_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
             logo_size_px = (float)LOGO_SIZE_MAX_MM * pixels_per_milli;
       }
@@ -289,7 +310,8 @@ int main(int argc, char **argv)
 
    draw_svg(image, x, y, image_w, image_h);
 
-   if (message) {
+   if (message)
+   {
       int textWidth, textHeight;
 
       font = nsvgParseFromFile(font_path, "px", 512);
@@ -302,8 +324,6 @@ int main(int argc, char **argv)
 
       float fontsz = ((float)font_size * PT_TO_MM) / (font->fontAscent - font->fontDescent) * pixels_per_milli;
 
-      //fontsz = 0.1;
-
       getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
 
       int tx = w / 2.f - textWidth / 2.f;
@@ -315,20 +335,25 @@ int main(int argc, char **argv)
    tfb_flush_window();
    tfb_flush_fb();
 #define ANIM_HEIGHT 600
-   //unsigned char* animation_buf = malloc(w * ANIM_HEIGHT * 4);
    int frame = 0;
+   int tty = open(active_tty, O_RDWR);
+   int tty_mode = 0;
    while (!terminate)
    {
-      //printf("FRAME: %d\n", frame);
-      animate_frame(frame++, w, y + image_h + 500);
-      //blit_buf(animation_buf, 0, y + image_h + 200, w, ANIM_HEIGHT, false, true);
-      //memset(animation_buf, 0, w * ANIM_HEIGHT * 4);
-      //tfb_flush_window();
+      animate_frame(frame++, w, h * 0.8);
       tfb_flush_fb();
-      //usleep(1666);
+      ioctl(tty, KDGETMODE, &tty_mode);
+      // Login started and has reset the TTY back to text mode
+      if (tty_mode == KD_TEXT)
+      {
+         // tfb_flush_window();
+         draw_svg(image, x, y, image_w, image_h);
+         goto out;
+      }
+      // usleep(1666);
    }
 
-   //free(animation_buf);
+   // free(animation_buf);
 
 out:
    nsvgDelete(font);

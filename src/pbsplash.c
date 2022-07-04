@@ -340,7 +340,7 @@ int main(int argc, char **argv)
    int tty_mode = 0;
    while (!terminate)
    {
-      animate_frame(frame++, w, h * 0.8);
+      animate_frame(frame++, w, h, dpi);
       tfb_flush_fb();
       ioctl(tty, KDGETMODE, &tty_mode);
       // Login started and has reset the TTY back to text mode

@@ -31,7 +31,7 @@
 
 volatile sig_atomic_t terminate = 0;
 
-bool debug = true;
+bool debug = false;
 struct col background_color = {.r = 0, .g = 0, .b = 0, .a = 255};
 
 #define LOG(fmt, ...)                         \
@@ -46,13 +46,13 @@ int usage()
    fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
    fprintf(stderr, "-------------------------------------------\n");
    fprintf(stderr, "pbsplash [-h] [-d] [-f font] [-s splash image] [-m message]\n\n");
-   fprintf(stderr, "    -v|--verbose          enable verbose logging\n");
-   fprintf(stderr, "    -h|--help             show this help\n");
-   fprintf(stderr, "    -f|--font             path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
-   fprintf(stderr, "    -s|--splash-image     path to splash image to display\n");
-   fprintf(stderr, "    -m|--message          message to show under the splash image\n");
-   fprintf(stderr, "    -p|--font-size        font size in pt (default: %d)\n", FONT_SIZE_PT);
-   fprintf(stderr, "    -d|--dpi              custom DPI (for testing)\n");
+   fprintf(stderr, "    -v           enable verbose logging\n");
+   fprintf(stderr, "    -h           show this help\n");
+   fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
+   fprintf(stderr, "    -s           path to splash image to display\n");
+   fprintf(stderr, "    -m           message to show under the splash image\n");
+   fprintf(stderr, "    -p           font size in pt (default: %d)\n", FONT_SIZE_PT);
+   fprintf(stderr, "    -d           custom DPI (for testing)\n");
 
    return 1;
 }

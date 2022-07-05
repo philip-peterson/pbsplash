@@ -978,7 +978,7 @@ static void nsvg__addShape(NSVGparser* p)
 	shape->fillRule = attr->fillRule;
 	shape->opacity = attr->opacity;
 
-	if (p->unicodeFlag) {
+	if (p->unicodeFlag[0]) {
 		strcat(shape->unicode, p->unicodeFlag);
 		if (p->horizAdvFlag) {
 			shape->horizAdvX = strtol(p->horizAdvFlag, &end, 10);
@@ -2973,7 +2973,7 @@ NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 		for (shape = image->shapes; shape != NULL; shape = shape->next) {
 			if (!(shape->flags & NSVG_FLAGS_VISIBLE))
 				continue;
-			if (shape->unicode && shape->unicode[0] == text[i]) {
+			if (shape->unicode[0] == text[i]) {
 				ret[i] = shape;
 				goto found;
 			}

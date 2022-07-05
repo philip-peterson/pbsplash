@@ -20,7 +20,7 @@ void circles_wave(int frame, int w, int y_off, long dpi) {
     int dist = rad * 4;
     int amplitude = rad * 2;
 
-    int left = (w / 2) - (dist * n_circles / 2.0);
+    int left = (w / 2) - (dist * (n_circles-1) / 2.0);
     for (unsigned int i = 0; i < n_circles; i++)
     {
         int x = left + (i * dist);

@@ -29,6 +29,8 @@
 
 #define DEBUGRENDER 0
 
+#define MM_TO_PX(dpi, mm) (dpi / 25.4) * mm
+
 volatile sig_atomic_t terminate = 0;
 
 bool debug = false;
@@ -327,7 +329,7 @@ int main(int argc, char **argv)
       getTextDimensions(font, message, fontsz, &textWidth, &textHeight);
 
       int tx = w / 2.f - textWidth / 2.f;
-      int ty = y + image_h + textHeight * 0.5f;
+      int ty = y + image_h + textHeight * 0.5f + MM_TO_PX(dpi, 2);
 
       draw_text(font, message, tx, ty, textWidth, textHeight, fontsz, tfb_gray);
    }

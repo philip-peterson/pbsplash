@@ -253,7 +253,7 @@ int main(int argc, char **argv)
 
 	LOG("active tty: '%s'\n", active_tty);
 
-	if ((rc = tfb_acquire_fb(/*TFB_FL_USE_DOUBLE_BUFFER*/ 0, "/dev/fb0",
+	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */0, "/dev/fb0",
 				 active_tty)) != TFB_SUCCESS) {
 		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n",
 			rc);
@@ -341,26 +341,21 @@ int main(int argc, char **argv)
 
 	tfb_flush_window();
 	tfb_flush_fb();
-#define ANIM_HEIGHT 600
+
 	int frame = 0;
 	int tty = open(active_tty, O_RDWR);
-	int tty_mode = 0;
 	while (!terminate) {
 		animate_frame(frame++, w, h, dpi);
 		tfb_flush_fb();
-		ioctl(tty, KDGETMODE, &tty_mode);
-		// Login started and has reset the TTY back to text mode
-		if (tty_mode == KD_TEXT) {
-			// tfb_flush_window();
-			draw_svg(image, x, y, image_w, image_h);
-			goto out;
-		}
-		// usleep(1666);
 	}
 
-	// free(animation_buf);
-
 out:
+	// Before we exit print the logo so it will persist
+	if (image) {
+		ioctl(tty, KDSETMODE, KD_TEXT);
+		draw_svg(image, x, y, image_w, image_h);
+	}
+
 	nsvgDelete(font);
 	nsvgDelete(image);
 	// The TTY might end up in a weird state if this

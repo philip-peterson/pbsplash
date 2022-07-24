@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -35,6 +36,8 @@ volatile sig_atomic_t terminate = 0;
 
 bool debug = false;
 struct col background_color = { .r = 0, .g = 0, .b = 0, .a = 255 };
+
+static int screenWidth, screenHeight;
 
 #define LOG(fmt, ...)                                                          \
 	do {                                                                   \
@@ -151,21 +154,40 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width,
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
  */
-static void getTextDimensions(NSVGimage *font, char *text, float scale,
+static char* getTextDimensions(NSVGimage *font, char *text, float scale,
 			      int *width, int *height)
 {
-	int i = 0;
+	int i;
+	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
+	int maxWidth = 0;
+	char *out_text = malloc(strlen(text));
+
+	if (text == NULL)
+		return text;
 
 	*width = 0;
 	// The height is simply the height of the font * the scale factor
-	*height = (font->fontAscent - font->fontDescent) * scale;
-	if (text == NULL)
-		return;
+	*height = fontHeight;
 
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
 	// Iterate over every glyph in the string to get the total width
-	for (i = 0; i < strlen(text); i++) {
+	for (i = 0; text[i] != '\0'; i++) {
 		NSVGshape *shape = shapes[i];
+		out_text[i] = text[i];
+		if (*width > screenWidth * 0.95) {
+			printf("Inserting newline! %d\n", i);
+			while (out_text[i] != ' ' && i > 0)
+				i--;
+			out_text[i] = '\n';
+		}
+
+		if (out_text[i] == '\n') {
+			*height += fontHeight;
+			maxWidth = *width > maxWidth ? *width : maxWidth;
+			*width = 0;
+			continue;
+		}
+
 		if (shape) {
 			*width += (float)shapes[i]->horizAdvX * scale + 0.5;
 		} else {
@@ -173,7 +195,11 @@ static void getTextDimensions(NSVGimage *font, char *text, float scale,
 		}
 	}
 
+	*width = *width > maxWidth ? *width : maxWidth;
+	printf("Got text dimensions: %dx%d\n", *width, *height);
+
 	free(shapes);
+	return out_text;
 }
 
 int main(int argc, char **argv)
@@ -261,22 +287,22 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
-	int w = (int)tfb_screen_width();
-	int h = (int)tfb_screen_height();
+	screenWidth = (int)tfb_screen_width();
+	screenHeight = (int)tfb_screen_height();
 
 	int w_mm = tfb_screen_width_mm();
 	int h_mm = tfb_screen_height_mm();
 	// If DPI is specified on cmdline then calculate display size from it
 	// otherwise calculate the dpi based on the display size.
 	if (dpi > 0) {
-		w_mm = w / (float)dpi * 25.4;
-		h_mm = h / (float)dpi * 25.4;
+		w_mm = screenWidth / (float)dpi * 25.4;
+		h_mm = screenHeight / (float)dpi * 25.4;
 	} else {
-		dpi = (float)w / (float)w_mm * 25.4;
+		dpi = (float)screenWidth / (float)w_mm * 25.4;
 	}
-	int pixels_per_milli = (float)w / (float)w_mm;
+	int pixels_per_milli = (float)screenWidth / (float)w_mm;
 
-	float logo_size_px = (float)(w < h ? w : h) * 0.75f;
+	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
 			if (w_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
@@ -289,7 +315,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", w, h, w_mm, h_mm,
+	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth, screenHeight, w_mm, h_mm,
 	    dpi, logo_size_px);
 
 	image = nsvgParseFromFile(splash_image, "", logo_size_px);
@@ -304,8 +330,8 @@ int main(int argc, char **argv)
 		(image->width > image->height ? image->width : image->height);
 	int image_w = image->width * sz + 0.5;
 	int image_h = image->height * sz + 0.5;
-	float x = (float)w / 2;
-	float y = (float)h / 2;
+	float x = (float)screenWidth / 2;
+	float y = (float)screenHeight / 2;
 	// Center the image
 	x -= image_w * 0.5f;
 	y -= image_h * 0.5f;
@@ -328,11 +354,11 @@ int main(int argc, char **argv)
 		float fontsz = ((float)font_size * PT_TO_MM) /
 			       (font->fontAscent - font->fontDescent) *
 			       pixels_per_milli;
-
-		getTextDimensions(font, message, fontsz, &textWidth,
+		LOG("Fontsz: %f\n", fontsz);
+		message = getTextDimensions(font, message, fontsz, &textWidth,
 				  &textHeight);
 
-		int tx = w / 2.f - textWidth / 2.f;
+		int tx = screenWidth / 2.f - textWidth / 2.f;
 		int ty = y + image_h + textHeight * 0.5f + MM_TO_PX(dpi, 2);
 
 		draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
@@ -345,7 +371,7 @@ int main(int argc, char **argv)
 	int frame = 0;
 	int tty = open(active_tty, O_RDWR);
 	while (!terminate) {
-		animate_frame(frame++, w, h, dpi);
+		animate_frame(frame++, screenWidth, screenHeight, dpi);
 		tfb_flush_fb();
 	}
 

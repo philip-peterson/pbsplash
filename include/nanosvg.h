@@ -2970,6 +2970,10 @@ NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 	// make list of paths representing glyphs to render
 	for (i = 0; i < textLen; i++)
 	{
+		if (text[i] == ' ' || text[i] == '\n') {
+			ret[i] = NULL;
+			continue;
+		}
 		for (shape = image->shapes; shape != NULL; shape = shape->next) {
 			if (!(shape->flags & NSVG_FLAGS_VISIBLE))
 				continue;

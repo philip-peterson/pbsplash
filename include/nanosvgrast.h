@@ -1372,6 +1372,13 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 	NSVGcachedPaint cache;
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
 	int i = 0, j = 0, textLen = strlen(text);
+	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
+	int xStart = tx;
+	int charWidth = font->defaultHorizAdv * scale;
+
+	// Hack because for some reason this has Y increase UP and we
+	// need to go DOWN every line
+	ty = ty + h - fontHeight;
 
 	r->bitmap = dst;
 	r->width = w;
@@ -1391,10 +1398,16 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 	}
 
 	for (i = 0; i < textLen; i++) {
+		if (text[i] == '\n') {
+			ty -= fontHeight;
+			// No clue why this is needed
+			tx = xStart - charWidth;
+			continue;
+		}
 		shape = shapes[i];
 		if (!shape) {
 			if (text[i] == ' ')
-				tx += font->defaultHorizAdv * scale;
+				tx += charWidth;
 			continue;
 		}
 		if (!(shape->flags & NSVG_FLAGS_VISIBLE))

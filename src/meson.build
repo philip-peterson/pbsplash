@@ -1,6 +1,7 @@
 src = [
-        'pbsplash.c',
         'animate.c',
+        'nanosvg.c',
+        'pbsplash.c',
 ]
 
 executable('pbsplash', src,

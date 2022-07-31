@@ -51,7 +51,7 @@ int usage()
 	fprintf(stderr, "-------------------------------------------\n");
 	fprintf(stderr, "pbsplash [-v] [-h] [-f font] [-s splash image] [-m message]\n");
 	fprintf(stderr, "         [-b message bottom] [-o font size bottom]\n");
-	fprintf(stderr, "         [-p font size] [-q max logo size] [-d]\n\n");
+	fprintf(stderr, "         [-p font size] [-q max logo size] [-d] [-e]\n\n");
 	fprintf(stderr, "    -v           enable verbose logging\n");
 	fprintf(stderr, "    -h           show this help\n");
 	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
@@ -62,6 +62,7 @@ int usage()
 	fprintf(stderr, "    -p           font size in pt (default: %d)\n", FONT_SIZE_PT);
 	fprintf(stderr, "    -q           max logo size in mm (default: %d)\n", LOGO_SIZE_MAX_MM);
 	fprintf(stderr, "    -d           custom DPI (for testing)\n");
+	fprintf(stderr, "    -e           error (no loading animation)\n");
 	// clang-format on
 
 	return 1;
@@ -220,6 +221,7 @@ int main(int argc, char **argv)
 	float logo_size_max = LOGO_SIZE_MAX_MM;
 	int optflag;
 	long dpi = 0;
+	bool animation = true;
 
 	memset(active_tty, '\0', TTY_PATH_LEN);
 	strcat(active_tty, "/dev/");
@@ -229,7 +231,7 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	while ((optflag = getopt(argc, argv, "hvf:s:m:b:o:p:q:d:")) != -1) {
+	while ((optflag = getopt(argc, argv, "hvf:s:m:b:o:p:q:d:e")) != -1) {
 		char *end = NULL;
 		switch (optflag) {
 		case 'h':
@@ -280,6 +282,9 @@ int main(int argc, char **argv)
 					optarg);
 				return usage();
 			}
+			break;
+		case 'e':
+			animation = false;
 			break;
 		default:
 			return usage();
@@ -412,6 +417,10 @@ int main(int argc, char **argv)
 	int tty = open(active_tty, O_RDWR);
 	float y_off = y + image_h + MM_TO_PX(dpi, 5);
 	while (!terminate) {
+		if (!animation) {
+			sleep(1);
+			continue;
+		}
 		animate_frame(frame++, screenWidth, y_off, dpi);
 		tfb_flush_fb();
 	}

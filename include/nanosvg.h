@@ -2966,7 +2966,7 @@ static void nsvg__scaleToViewbox(NSVGparser* p, const char* units)
 NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
 {
 	NSVGshape *shape = NULL;
-	NSVGshape **ret = malloc(sizeof(NSVGshape*)*textLen); // array of paths, text to render
+	NSVGshape **ret = calloc(textLen, sizeof(shape)); // array of paths, text to render
 	int i;
 
 	// make list of paths representing glyphs to render

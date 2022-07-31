@@ -248,10 +248,6 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 'd':
-			if (!optarg) {
-				fprintf(stderr, "--dpi requires an argument\n");
-				return usage();
-			}
 			dpi = strtol(optarg, &end, 10);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid dpi: %s\n",

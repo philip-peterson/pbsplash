@@ -254,7 +254,7 @@ int main(int argc, char **argv)
 			}
 			dpi = strtol(optarg, &end, 10);
 			if (end == optarg) {
-				fprintf(stderr, "Invalid font size: %s\n",
+				fprintf(stderr, "Invalid dpi: %s\n",
 					optarg);
 				return usage();
 			}

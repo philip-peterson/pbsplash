@@ -10,6 +10,6 @@ struct col {
    };
 };
 
-void animate_frame(int frame, int w, int h, long dpi);
+void animate_frame(int frame, int w, int y_off, long dpi);
 
 #endif

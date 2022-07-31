@@ -364,7 +364,7 @@ int main(int argc, char **argv)
 				  &textHeight);
 
 		int tx = screenWidth / 2.f - textWidth / 2.f;
-		int ty = y + image_h + textHeight * 0.5f + MM_TO_PX(dpi, 2);
+		int ty = y + image_h + textHeight * 0.5f + MM_TO_PX(dpi, 20);
 
 		draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
 			  tfb_gray);
@@ -375,8 +375,9 @@ int main(int argc, char **argv)
 
 	int frame = 0;
 	int tty = open(active_tty, O_RDWR);
+	float y_off = y + image_h + MM_TO_PX(dpi, 5);
 	while (!terminate) {
-		animate_frame(frame++, screenWidth, screenHeight, dpi);
+		animate_frame(frame++, screenWidth, y_off, dpi);
 		tfb_flush_fb();
 	}
 

@@ -23,6 +23,7 @@
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 #define LOGO_SIZE_MAX_MM  90
 #define FONT_SIZE_PT	  9
+#define FONT_SIZE_B_PT    5
 #define PT_TO_MM	  0.38f
 #define TTY_PATH_LEN	  11
 
@@ -49,12 +50,15 @@ int usage()
 	fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
 	fprintf(stderr, "-------------------------------------------\n");
 	fprintf(stderr, "pbsplash [-v] [-h] [-f font] [-s splash image] [-m message]\n");
+	fprintf(stderr, "         [-b message bottom] [-o font size bottom]\n");
 	fprintf(stderr, "         [-p font size] [-q max logo size] [-d]\n\n");
 	fprintf(stderr, "    -v           enable verbose logging\n");
 	fprintf(stderr, "    -h           show this help\n");
 	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
 	fprintf(stderr, "    -s           path to splash image to display\n");
 	fprintf(stderr, "    -m           message to show under the splash image\n");
+	fprintf(stderr, "    -b           message to show at the bottom\n");
+	fprintf(stderr, "    -o           font size bottom in pt (default: %d)\n", FONT_SIZE_B_PT);
 	fprintf(stderr, "    -p           font size in pt (default: %d)\n", FONT_SIZE_PT);
 	fprintf(stderr, "    -q           max logo size in mm (default: %d)\n", LOGO_SIZE_MAX_MM);
 	fprintf(stderr, "    -d           custom DPI (for testing)\n");
@@ -204,6 +208,7 @@ int main(int argc, char **argv)
 {
 	int rc = 0;
 	char *message = NULL;
+	char *message_bottom = NULL;
 	char *splash_image = NULL;
 	char *font_path = DEFAULT_FONT_PATH;
 	char active_tty[TTY_PATH_LEN + 1];
@@ -211,6 +216,7 @@ int main(int argc, char **argv)
 	NSVGimage *font = NULL;
 	struct sigaction action;
 	float font_size = FONT_SIZE_PT;
+	float font_size_b = FONT_SIZE_B_PT;
 	float logo_size_max = LOGO_SIZE_MAX_MM;
 	int optflag;
 	long dpi = 0;
@@ -223,7 +229,7 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	while ((optflag = getopt(argc, argv, "hvf:s:m:p:q:d:")) != -1) {
+	while ((optflag = getopt(argc, argv, "hvf:s:m:b:o:p:q:d:")) != -1) {
 		char *end = NULL;
 		switch (optflag) {
 		case 'h':
@@ -239,6 +245,17 @@ int main(int argc, char **argv)
 			break;
 		case 'm':
 			message = optarg;
+			break;
+		case 'b':
+			message_bottom = optarg;
+			break;
+		case 'o':
+			font_size_b = strtof(optarg, &end);
+			if (end == optarg) {
+				fprintf(stderr, "Invalid font size: %s\n",
+					optarg);
+				return usage();
+			}
 			break;
 		case 'p':
 			font_size = strtof(optarg, &end);
@@ -344,7 +361,7 @@ int main(int argc, char **argv)
 
 	draw_svg(image, x, y, image_w, image_h);
 
-	if (message) {
+	if (message || message_bottom) {
 		int textWidth, textHeight;
 
 		font = nsvgParseFromFile(font_path, "px", 512);
@@ -366,6 +383,20 @@ int main(int argc, char **argv)
 
 		draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
 			  tfb_gray);
+		
+
+		if (message_bottom) {
+			fontsz = ((float)font_size_b * PT_TO_MM) /
+				(font->fontAscent - font->fontDescent) *
+				pixels_per_milli;
+
+			message_bottom = getTextDimensions(font, message_bottom, fontsz,
+					&textWidth, &textHeight);
+			int tx = screenWidth / 2.f - textWidth / 2.f;
+			ty = screenHeight - MM_TO_PX(dpi, 2);
+			draw_text(font, message_bottom, tx, ty, textWidth,
+				textHeight, fontsz, tfb_gray);
+		}
 	}
 
 	tfb_flush_window();

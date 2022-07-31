@@ -182,6 +182,8 @@ NSVGpath* nsvgDuplicatePath(NSVGpath* p);
 // Deletes an image.
 void nsvgDelete(NSVGimage* image);
 
+NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen);
+
 #ifndef NANOSVG_CPLUSPLUS
 #ifdef __cplusplus
 }

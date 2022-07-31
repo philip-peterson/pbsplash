@@ -66,6 +66,12 @@ void nsvgRasterize(NSVGrasterizer* r,
 void nsvgDeleteRasterizer(NSVGrasterizer*);
 
 
+void nsvgRasterizeText(NSVGrasterizer* r,
+				   NSVGimage* font, float tx, float ty, float scale,
+				   unsigned char* dst, int w, int h, int stride,
+				   char* text);
+
+
 #ifndef NANOSVGRAST_CPLUSPLUS
 #ifdef __cplusplus
 }

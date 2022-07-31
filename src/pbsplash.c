@@ -50,7 +50,8 @@ int usage()
 	// clang-format off
 	fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
 	fprintf(stderr, "-------------------------------------------\n");
-	fprintf(stderr, "pbsplash [-h] [-d] [-f font] [-s splash image] [-m message]\n\n");
+	fprintf(stderr, "pbsplash [-v] [-h] [-f font] [-s splash image] [-m message]\n");
+	fprintf(stderr, "         [-p font size] [-d]\n\n");
 	fprintf(stderr, "    -v           enable verbose logging\n");
 	fprintf(stderr, "    -h           show this help\n");
 	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);

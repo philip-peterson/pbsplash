@@ -51,13 +51,14 @@ int usage()
 	fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
 	fprintf(stderr, "-------------------------------------------\n");
 	fprintf(stderr, "pbsplash [-v] [-h] [-f font] [-s splash image] [-m message]\n");
-	fprintf(stderr, "         [-p font size] [-d]\n\n");
+	fprintf(stderr, "         [-p font size] [-q max logo size] [-d]\n\n");
 	fprintf(stderr, "    -v           enable verbose logging\n");
 	fprintf(stderr, "    -h           show this help\n");
 	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
 	fprintf(stderr, "    -s           path to splash image to display\n");
 	fprintf(stderr, "    -m           message to show under the splash image\n");
 	fprintf(stderr, "    -p           font size in pt (default: %d)\n", FONT_SIZE_PT);
+	fprintf(stderr, "    -q           max logo size in mm (default: %d)\n", LOGO_SIZE_MAX_MM);
 	fprintf(stderr, "    -d           custom DPI (for testing)\n");
 	// clang-format on
 
@@ -212,6 +213,7 @@ int main(int argc, char **argv)
 	NSVGimage *font = NULL;
 	struct sigaction action;
 	float font_size = FONT_SIZE_PT;
+	float logo_size_max = LOGO_SIZE_MAX_MM;
 	int optflag;
 	long dpi = 0;
 
@@ -223,7 +225,7 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	while ((optflag = getopt(argc, argv, "hvf:s:m:p:d:")) != -1) {
+	while ((optflag = getopt(argc, argv, "hvf:s:m:p:q:d:")) != -1) {
 		char *end = NULL;
 		switch (optflag) {
 		case 'h':
@@ -244,6 +246,14 @@ int main(int argc, char **argv)
 			font_size = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid font size: %s\n",
+					optarg);
+				return usage();
+			}
+			break;
+		case 'q':
+			logo_size_max = strtof(optarg, &end);
+			if (end == optarg) {
+				fprintf(stderr, "Invalid max logo size: %s\n",
 					optarg);
 				return usage();
 			}
@@ -300,12 +310,12 @@ int main(int argc, char **argv)
 	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
-			if (w_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
-				logo_size_px = (float)LOGO_SIZE_MAX_MM *
+			if (w_mm > logo_size_max * 1.2f)
+				logo_size_px = logo_size_max *
 					       pixels_per_milli;
 		} else {
-			if (h_mm > (float)LOGO_SIZE_MAX_MM * 1.2f)
-				logo_size_px = (float)LOGO_SIZE_MAX_MM *
+			if (h_mm > logo_size_max * 1.2f)
+				logo_size_px = logo_size_max *
 					       pixels_per_milli;
 		}
 	}

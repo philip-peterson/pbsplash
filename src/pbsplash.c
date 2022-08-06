@@ -327,7 +327,10 @@ int main(int argc, char **argv)
 	}
 	int pixels_per_milli = (float)screenWidth / (float)w_mm;
 
-	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.65f;
+	if (logo_size_max * pixels_per_milli > screenWidth)
+		logo_size_max = (screenWidth * 0.75f) / pixels_per_milli;
+
+	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
 			if (w_mm > logo_size_max * 1.2f)
@@ -350,11 +353,20 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	if (image->width < image->height * 1.5)
+		logo_size_px = MM_TO_PX(dpi, 25);
+
 	float sz =
 		(float)logo_size_px /
-		(image->width > image->height ? image->width : image->height);
-	int image_w = image->width * sz + 0.5;
-	int image_h = image->height * sz + 0.5;
+		(image->width > image->height ? image->height : image->width);
+	float image_w = image->width * sz + 0.5;
+	float image_h = image->height * sz + 0.5;
+	if (image_w > (logo_size_max * pixels_per_milli)) {
+		float scalefactor = ((float)(logo_size_max * pixels_per_milli)/ image_w);
+		printf("Got scale factor: %f\n", scalefactor);
+		image_w = logo_size_max * pixels_per_milli;
+		image_h *= scalefactor;
+	}
 	float x = (float)screenWidth / 2;
 	float y = (float)screenHeight / 2;
 	// Center the image

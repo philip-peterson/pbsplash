@@ -21,7 +21,7 @@
 
 #define MSG_MAX_LEN	  4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
-#define LOGO_SIZE_MAX_MM  90
+#define LOGO_SIZE_MAX_MM  50
 #define FONT_SIZE_PT	  9
 #define FONT_SIZE_B_PT    5
 #define PT_TO_MM	  0.38f
@@ -29,7 +29,7 @@
 
 #define DEBUGRENDER	  0
 
-#define MM_TO_PX(dpi, mm) (dpi / 25.4) * mm
+#define MM_TO_PX(dpi, mm) (dpi / 25.4) * (mm)
 
 volatile sig_atomic_t terminate = 0;
 
@@ -322,7 +322,7 @@ int main(int argc, char **argv)
 	}
 	int pixels_per_milli = (float)screenWidth / (float)w_mm;
 
-	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
+	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.65f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
 			if (w_mm > logo_size_max * 1.2f)
@@ -355,6 +355,7 @@ int main(int argc, char **argv)
 	// Center the image
 	x -= image_w * 0.5f;
 	y -= image_h * 0.5f;
+	float animation_y = y + image_h + MM_TO_PX(dpi, 8);
 
 	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
 					background_color.b));
@@ -362,7 +363,9 @@ int main(int argc, char **argv)
 	draw_svg(image, x, y, image_w, image_h);
 
 	if (message || message_bottom) {
-		int textWidth, textHeight;
+		int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi, 5);
+		float fontsz;
+		int tx, ty;
 
 		font = nsvgParseFromFile(font_path, "px", 512);
 		if (!font || !font->shapes) {
@@ -371,32 +374,35 @@ int main(int argc, char **argv)
 			goto out;
 		}
 
-		float fontsz = ((float)font_size * PT_TO_MM) /
-			       (font->fontAscent - font->fontDescent) *
-			       pixels_per_milli;
-		LOG("Fontsz: %f\n", fontsz);
-		message = getTextDimensions(font, message, fontsz, &textWidth,
-				  &textHeight);
-
-		int tx = screenWidth / 2.f - textWidth / 2.f;
-		int ty = y + image_h + textHeight * 0.5f + MM_TO_PX(dpi, 20);
-
-		draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
-			  tfb_gray);
-		
-
 		if (message_bottom) {
 			fontsz = ((float)font_size_b * PT_TO_MM) /
 				(font->fontAscent - font->fontDescent) *
 				pixels_per_milli;
 
 			message_bottom = getTextDimensions(font, message_bottom, fontsz,
-					&textWidth, &textHeight);
-			int tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = screenHeight - MM_TO_PX(dpi, 2);
+					&textWidth, &bottomTextHeight);
+			tx = screenWidth / 2.f - textWidth / 2.f;
+			ty = screenHeight - bottomTextHeight - MM_TO_PX(dpi, 2);
 			draw_text(font, message_bottom, tx, ty, textWidth,
-				textHeight, fontsz, tfb_gray);
+				bottomTextHeight, fontsz, tfb_gray);
 		}
+
+		if (message) {
+			fontsz = ((float)font_size * PT_TO_MM) /
+				(font->fontAscent - font->fontDescent) *
+				pixels_per_milli;
+			LOG("Fontsz: %f\n", fontsz);
+			message = getTextDimensions(font, message, fontsz, &textWidth,
+					&textHeight);
+
+			tx = screenWidth / 2.f - textWidth / 2.f;
+			ty = animation_y + ((screenHeight - bottomTextHeight) - animation_y) / 3.f;
+
+			draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
+				tfb_gray);
+		}
+
+
 	}
 
 	tfb_flush_window();

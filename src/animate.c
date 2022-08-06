@@ -26,9 +26,12 @@ void circles_wave(int frame, int w, int y_off, long dpi)
 		int x = left + (i * dist);
 		double offset = sin(f / 60.0 * PI + i);
 		int y = y_off + offset * amplitude;
-		tfb_fill_rect(x - rad - 1, y_off - amplitude - rad, rad * 2 + 2,
-			      amplitude * 2 + rad * 2 + 1, tfb_black);
+		tfb_fill_rect(x - rad - 3, y_off - amplitude - rad - 3,
+			      rad * 2 + 6, amplitude * 2 + rad * 2 + 6,
+			      tfb_black);
 		tfb_draw_circle(x, y, rad, t_col);
+		tfb_draw_circle(x, y, rad+1, t_col);
+		tfb_draw_circle(x, y, rad+2, t_col);
 	}
 }
 

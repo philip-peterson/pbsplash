@@ -1413,7 +1413,7 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 		shape = shapes[i];
 		if (!shape) {
 			if (text[i] == ' ')
-				tx += charWidth;
+				tx += charWidth / 2.f;
 			continue;
 		}
 		if (!(shape->flags & NSVG_FLAGS_VISIBLE))

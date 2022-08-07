@@ -21,7 +21,7 @@
 
 #define MSG_MAX_LEN	  4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
-#define LOGO_SIZE_MAX_MM  50
+#define LOGO_SIZE_MAX_MM  25
 #define FONT_SIZE_PT	  9
 #define FONT_SIZE_B_PT    5
 #define PT_TO_MM	  0.38f
@@ -372,7 +372,7 @@ int main(int argc, char **argv)
 	// Center the image
 	x -= image_w * 0.5f;
 	y -= image_h * 0.5f;
-	float animation_y = y + image_h + MM_TO_PX(dpi, 8);
+	float animation_y = y + image_h + MM_TO_PX(dpi, 5);
 
 	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
 					background_color.b));
@@ -413,7 +413,7 @@ int main(int argc, char **argv)
 					&textHeight);
 
 			tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = animation_y + ((screenHeight - bottomTextHeight) - animation_y) / 3.f;
+			ty = screenHeight - bottomTextHeight - MM_TO_PX(dpi, font_size_b * PT_TO_MM * 2) - textHeight;
 
 			draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
 				tfb_gray);
@@ -427,13 +427,12 @@ int main(int argc, char **argv)
 
 	int frame = 0;
 	int tty = open(active_tty, O_RDWR);
-	float y_off = y + image_h + MM_TO_PX(dpi, 5);
 	while (!terminate) {
 		if (!animation) {
 			sleep(1);
 			continue;
 		}
-		animate_frame(frame++, screenWidth, y_off, dpi);
+		animate_frame(frame++, screenWidth, animation_y, dpi);
 		tfb_flush_fb();
 	}
 

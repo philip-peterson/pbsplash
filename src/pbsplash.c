@@ -21,7 +21,7 @@
 
 #define MSG_MAX_LEN	  4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
-#define LOGO_SIZE_MAX_MM  25
+#define LOGO_SIZE_MAX_MM  40
 #define FONT_SIZE_PT	  9
 #define FONT_SIZE_B_PT    5
 #define PT_TO_MM	  0.38f
@@ -170,7 +170,7 @@ static char* getTextDimensions(NSVGimage *font, char *text, float scale,
 	if (text == NULL)
 		return text;
 
-	*width = 0;
+	*width = font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
 	*height = fontHeight;
 
@@ -193,7 +193,7 @@ static char* getTextDimensions(NSVGimage *font, char *text, float scale,
 		}
 
 		if (shape) {
-			*width += (float)shapes[i]->horizAdvX * scale + 0.5;
+			*width += (float)shapes[i]->horizAdvX * scale + 2;
 		} else {
 			*width += font->defaultHorizAdv * scale;
 		}
@@ -400,7 +400,7 @@ int main(int argc, char **argv)
 					&textWidth, &bottomTextHeight);
 			tx = screenWidth / 2.f - textWidth / 2.f;
 			ty = screenHeight - bottomTextHeight - MM_TO_PX(dpi, 2);
-			draw_text(font, message_bottom, tx, ty, textWidth,
+			draw_text(font, message_bottom, tx, ty, screenWidth,
 				bottomTextHeight, fontsz, tfb_gray);
 		}
 
@@ -427,6 +427,10 @@ int main(int argc, char **argv)
 
 	int frame = 0;
 	int tty = open(active_tty, O_RDWR);
+	if (!tty) {
+		fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
+		goto out;
+	}
 	while (!terminate) {
 		if (!animation) {
 			sleep(1);

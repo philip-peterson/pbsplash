@@ -136,7 +136,7 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 	nsvgDeleteRasterizer(rast);
 }
 
-static void draw_text(NSVGimage *font, char *text, int x, int y, int width,
+static void draw_text(NSVGimage *font, const char *text, int x, int y, int width,
 		      int height, float scale, unsigned int tfb_col)
 {
 	LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
@@ -159,16 +159,17 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width,
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
  */
-static char *getTextDimensions(NSVGimage *font, char *text, float scale,
+static const char *getTextDimensions(NSVGimage *font, const char *text, float scale,
 			       int *width, int *height)
 {
 	int i;
 	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
 	int maxWidth = 0;
-	char *out_text = malloc(strlen(text));
 
 	if (text == NULL)
 		return text;
+
+	char *out_text = malloc(strlen(text));
 
 	*width = font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
@@ -210,14 +211,16 @@ struct dpi_info {
 	int pixels_per_milli;
 	float logo_size_px;
 	int logo_size_max_mm;
+	int font_size;
+	int font_size_b; // Bottom text font size
 };
 
-static void calculate_dpi_info(struct dpi_info *info)
+static void calculate_dpi_info(struct dpi_info *dpi_info)
 {
 	int w_mm = tfb_screen_width_mm();
 	int h_mm = tfb_screen_height_mm();
 
-	if ((w_mm < 1 || h_mm < 1) && !info->dpi) {
+	if ((w_mm < 1 || h_mm < 1) && !dpi_info->dpi) {
 		FILE *fp = fopen("/dev/kmsg", "w");
 		if (fp != NULL) {
 			fprintf(fp, "PBSPLASH: Invalid screen size: %dx%d\n",
@@ -231,38 +234,90 @@ static void calculate_dpi_info(struct dpi_info *info)
 		// Except ridiculous HiDPI displays
 		// which honestly should expose their physical
 		// dimensions....
-		info->dpi = 300;
+		dpi_info->dpi = 300;
 	}
 
 	// If DPI is specified on cmdline then calculate display size from it
 	// otherwise calculate the dpi based on the display size.
-	if (info->dpi > 0) {
-		w_mm = screenWidth / (float)info->dpi * 25.4;
-		h_mm = screenHeight / (float)info->dpi * 25.4;
+	if (dpi_info->dpi > 0) {
+		w_mm = screenWidth / (float)dpi_info->dpi * 25.4;
+		h_mm = screenHeight / (float)dpi_info->dpi * 25.4;
 	} else {
-		info->dpi = (float)screenWidth / (float)w_mm * 25.4;
+		dpi_info->dpi = (float)screenWidth / (float)w_mm * 25.4;
 	}
-	info->pixels_per_milli = (float)screenWidth / (float)w_mm;
+	dpi_info->pixels_per_milli = (float)screenWidth / (float)w_mm;
 
-	if (info->logo_size_max_mm * info->pixels_per_milli > screenWidth)
-		info->logo_size_max_mm = (screenWidth * 0.75f) / info->pixels_per_milli;
+	if (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli > screenWidth)
+		dpi_info->logo_size_max_mm = (screenWidth * 0.75f) / dpi_info->pixels_per_milli;
 
-	info->logo_size_px =
+	dpi_info->logo_size_px =
 		(float)(screenWidth < screenHeight ? screenWidth :
 						     screenHeight) *
 		0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
-			if (w_mm > info->logo_size_max_mm * 1.2f)
-				info->logo_size_px = info->logo_size_max_mm * info->pixels_per_milli;
+			if (w_mm > dpi_info->logo_size_max_mm * 1.2f)
+				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		} else {
-			if (h_mm > info->logo_size_max_mm * 1.2f)
-				info->logo_size_px = info->logo_size_max_mm * info->pixels_per_milli;
+			if (h_mm > dpi_info->logo_size_max_mm * 1.2f)
+				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		}
 	}
 
 	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
-	    screenHeight, w_mm, h_mm, info->dpi, info->logo_size_px);
+	    screenHeight, w_mm, h_mm, dpi_info->dpi, dpi_info->logo_size_px);
+}
+
+int show_messages(const struct dpi_info *dpi_info, const char *font_path, const char *message, const char *message_bottom)
+{
+	int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi_info->dpi, 6);
+	int bottomTextOffset = MM_TO_PX(dpi_info->dpi, 3);
+	NSVGimage *font = NULL;
+	float fontsz;
+	int tx, ty;
+
+	font = nsvgParseFromFile(font_path, "px", 512);
+	if (!font || !font->shapes) {
+		fprintf(stderr, "failed to load SVG font, can't render messages\n");
+		return 1;
+	}
+
+	if (message_bottom) {
+		fontsz = ((float)dpi_info->font_size_b * PT_TO_MM) /
+				(font->fontAscent - font->fontDescent) *
+				dpi_info->pixels_per_milli;
+
+		const char *text = getTextDimensions(font, message_bottom,
+							fontsz, &textWidth,
+							&bottomTextHeight);
+		tx = screenWidth / 2.f - textWidth / 2.f;
+		ty = screenHeight - bottomTextHeight - bottomTextOffset;
+		draw_text(font, text, tx, ty, textWidth,
+				bottomTextHeight, fontsz, tfb_gray);
+		if (text != message_bottom)
+			free((void *)text);
+	}
+
+	if (message) {
+		fontsz = ((float)dpi_info->font_size * PT_TO_MM) /
+				(font->fontAscent - font->fontDescent) *
+				dpi_info->pixels_per_milli;
+		LOG("Fontsz: %f\n", fontsz);
+		const char *text = getTextDimensions(font, message, fontsz,
+						&textWidth, &textHeight);
+
+		tx = screenWidth / 2.f - textWidth / 2.f;
+		ty = (screenHeight - bottomTextHeight - bottomTextOffset) -
+			MM_TO_PX(dpi_info->dpi, dpi_info->font_size_b * PT_TO_MM) -
+			textHeight;
+
+		draw_text(font, message, tx, ty, textWidth, textHeight,
+				fontsz, tfb_gray);
+		if (text != message)
+			free((void *)text);
+	}
+
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -276,13 +331,13 @@ int main(int argc, char **argv)
 	NSVGimage *image = NULL;
 	NSVGimage *font = NULL;
 	struct sigaction action;
-	float font_size = FONT_SIZE_PT;
-	float font_size_b = FONT_SIZE_B_PT;
 	struct dpi_info dpi_info = {
 		.dpi = 0,
 		.pixels_per_milli = 0,
 		.logo_size_px = 0,
-		.logo_size_max_mm = LOGO_SIZE_MAX_MM
+		.logo_size_max_mm = LOGO_SIZE_MAX_MM,
+		.font_size = FONT_SIZE_PT,
+		.font_size_b = FONT_SIZE_B_PT,
 	};
 	int optflag;
 	bool animation = true;
@@ -316,7 +371,7 @@ int main(int argc, char **argv)
 			message_bottom = optarg;
 			break;
 		case 'o':
-			font_size_b = strtof(optarg, &end);
+			dpi_info.font_size_b = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid font size: %s\n",
 					optarg);
@@ -324,7 +379,7 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 'p':
-			font_size = strtof(optarg, &end);
+			dpi_info.font_size = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid font size: %s\n",
 					optarg);
@@ -414,50 +469,8 @@ int main(int argc, char **argv)
 
 	draw_svg(image, x, y, image_w, image_h);
 
-	if (message || message_bottom) {
-		int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi_info.dpi, 6);
-		int bottomTextOffset = MM_TO_PX(dpi_info.dpi, 3);
-		float fontsz;
-		int tx, ty;
-
-		font = nsvgParseFromFile(font_path, "px", 512);
-		if (!font || !font->shapes) {
-			fprintf(stderr, "failed to load SVG font\n");
-			rc = 1;
-			goto out;
-		}
-
-		if (message_bottom) {
-			fontsz = ((float)font_size_b * PT_TO_MM) /
-				 (font->fontAscent - font->fontDescent) *
-				 dpi_info.pixels_per_milli;
-
-			message_bottom = getTextDimensions(font, message_bottom,
-							   fontsz, &textWidth,
-							   &bottomTextHeight);
-			tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = screenHeight - bottomTextHeight - bottomTextOffset;
-			draw_text(font, message_bottom, tx, ty, textWidth,
-				  bottomTextHeight, fontsz, tfb_gray);
-		}
-
-		if (message) {
-			fontsz = ((float)font_size * PT_TO_MM) /
-				 (font->fontAscent - font->fontDescent) *
-				 dpi_info.pixels_per_milli;
-			LOG("Fontsz: %f\n", fontsz);
-			message = getTextDimensions(font, message, fontsz,
-						    &textWidth, &textHeight);
-
-			tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = (screenHeight - bottomTextHeight - bottomTextOffset) -
-			     MM_TO_PX(dpi_info.dpi, font_size_b * PT_TO_MM) -
-			     textHeight;
-
-			draw_text(font, message, tx, ty, textWidth, textHeight,
-				  fontsz, tfb_gray);
-		}
-	}
+	if (message || message_bottom)
+		show_messages(&dpi_info, font_path, message, message_bottom);
 
 	tfb_flush_window();
 	tfb_flush_fb();

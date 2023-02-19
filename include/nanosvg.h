@@ -182,7 +182,7 @@ NSVGpath* nsvgDuplicatePath(NSVGpath* p);
 // Deletes an image.
 void nsvgDelete(NSVGimage* image);
 
-NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen);
+NSVGshape** nsvgGetTextShapes(NSVGimage* image, const char* text, int textLen);
 
 #ifndef NANOSVG_CPLUSPLUS
 #ifdef __cplusplus
@@ -2963,7 +2963,7 @@ static void nsvg__scaleToViewbox(NSVGparser* p, const char* units)
 	}
 }
 
-NSVGshape** nsvgGetTextShapes(NSVGimage* image, char* text, int textLen)
+NSVGshape** nsvgGetTextShapes(NSVGimage* image, const char* text, int textLen)
 {
 	NSVGshape *shape = NULL;
 	NSVGshape **ret = calloc(textLen, sizeof(shape)); // array of paths, text to render

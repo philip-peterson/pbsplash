@@ -69,7 +69,7 @@ void nsvgDeleteRasterizer(NSVGrasterizer*);
 void nsvgRasterizeText(NSVGrasterizer* r,
 				   NSVGimage* font, float tx, float ty, float scale,
 				   unsigned char* dst, int w, int h, int stride,
-				   char* text);
+				   const char* text);
 
 
 #ifndef NANOSVGRAST_CPLUSPLUS
@@ -1371,7 +1371,7 @@ static void dumpEdges(NSVGrasterizer* r, const char* name)
 void nsvgRasterizeText(NSVGrasterizer* r,
 				   NSVGimage* font, float tx, float ty, float scale,
 				   unsigned char* dst, int w, int h, int stride,
-				   char* text)
+				   const char* text)
 {
 	NSVGshape *shape = NULL;
 	NSVGedge *e = NULL;

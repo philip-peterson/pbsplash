@@ -23,7 +23,7 @@
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
 #define LOGO_SIZE_MAX_MM  40
 #define FONT_SIZE_PT	  9
-#define FONT_SIZE_B_PT    5
+#define FONT_SIZE_B_PT	  6
 #define PT_TO_MM	  0.38f
 #define TTY_PATH_LEN	  11
 
@@ -41,7 +41,7 @@ static int screenWidth, screenHeight;
 #define LOG(fmt, ...)                                                          \
 	do {                                                                   \
 		if (debug)                                                     \
-			printf(fmt, ##__VA_ARGS__);                   \
+			printf(fmt, ##__VA_ARGS__);                            \
 	} while (0)
 
 int usage()
@@ -159,8 +159,8 @@ static void draw_text(NSVGimage *font, char *text, int x, int y, int width,
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
  */
-static char* getTextDimensions(NSVGimage *font, char *text, float scale,
-			      int *width, int *height)
+static char *getTextDimensions(NSVGimage *font, char *text, float scale,
+			       int *width, int *height)
 {
 	int i;
 	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
@@ -205,6 +205,66 @@ static char* getTextDimensions(NSVGimage *font, char *text, float scale,
 	return out_text;
 }
 
+struct dpi_info {
+	long dpi;
+	int pixels_per_milli;
+	float logo_size_px;
+	int logo_size_max_mm;
+};
+
+static void calculate_dpi_info(struct dpi_info *info)
+{
+	int w_mm = tfb_screen_width_mm();
+	int h_mm = tfb_screen_height_mm();
+
+	if ((w_mm < 1 || h_mm < 1) && !info->dpi) {
+		FILE *fp = fopen("/dev/kmsg", "w");
+		if (fp != NULL) {
+			fprintf(fp, "PBSPLASH: Invalid screen size: %dx%d\n",
+				w_mm, h_mm);
+			fclose(fp);
+		}
+		fprintf(stderr, "Invalid screen size: %dx%d\n", w_mm, h_mm);
+
+		// Assume a dpi of 300
+		// This should be readable everywhere
+		// Except ridiculous HiDPI displays
+		// which honestly should expose their physical
+		// dimensions....
+		info->dpi = 300;
+	}
+
+	// If DPI is specified on cmdline then calculate display size from it
+	// otherwise calculate the dpi based on the display size.
+	if (info->dpi > 0) {
+		w_mm = screenWidth / (float)info->dpi * 25.4;
+		h_mm = screenHeight / (float)info->dpi * 25.4;
+	} else {
+		info->dpi = (float)screenWidth / (float)w_mm * 25.4;
+	}
+	info->pixels_per_milli = (float)screenWidth / (float)w_mm;
+
+	if (info->logo_size_max_mm * info->pixels_per_milli > screenWidth)
+		info->logo_size_max_mm = (screenWidth * 0.75f) / info->pixels_per_milli;
+
+	info->logo_size_px =
+		(float)(screenWidth < screenHeight ? screenWidth :
+						     screenHeight) *
+		0.75f;
+	if (w_mm > 0 && h_mm > 0) {
+		if (w_mm < h_mm) {
+			if (w_mm > info->logo_size_max_mm * 1.2f)
+				info->logo_size_px = info->logo_size_max_mm * info->pixels_per_milli;
+		} else {
+			if (h_mm > info->logo_size_max_mm * 1.2f)
+				info->logo_size_px = info->logo_size_max_mm * info->pixels_per_milli;
+		}
+	}
+
+	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
+	    screenHeight, w_mm, h_mm, info->dpi, info->logo_size_px);
+}
+
 int main(int argc, char **argv)
 {
 	int rc = 0;
@@ -218,9 +278,13 @@ int main(int argc, char **argv)
 	struct sigaction action;
 	float font_size = FONT_SIZE_PT;
 	float font_size_b = FONT_SIZE_B_PT;
-	float logo_size_max = LOGO_SIZE_MAX_MM;
+	struct dpi_info dpi_info = {
+		.dpi = 0,
+		.pixels_per_milli = 0,
+		.logo_size_px = 0,
+		.logo_size_max_mm = LOGO_SIZE_MAX_MM
+	};
 	int optflag;
-	long dpi = 0;
 	bool animation = true;
 
 	memset(active_tty, '\0', TTY_PATH_LEN);
@@ -268,7 +332,7 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 'q':
-			logo_size_max = strtof(optarg, &end);
+			dpi_info.logo_size_max_mm = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid max logo size: %s\n",
 					optarg);
@@ -276,10 +340,9 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 'd':
-			dpi = strtol(optarg, &end, 10);
+			dpi_info.dpi = strtol(optarg, &end, 10);
 			if (end == optarg) {
-				fprintf(stderr, "Invalid dpi: %s\n",
-					optarg);
+				fprintf(stderr, "Invalid dpi: %s\n", optarg);
 				return usage();
 			}
 			break;
@@ -304,7 +367,7 @@ int main(int argc, char **argv)
 
 	LOG("active tty: '%s'\n", active_tty);
 
-	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */0, "/dev/fb0",
+	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0",
 				 active_tty)) != TFB_SUCCESS) {
 		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n",
 			rc);
@@ -315,38 +378,9 @@ int main(int argc, char **argv)
 	screenWidth = (int)tfb_screen_width();
 	screenHeight = (int)tfb_screen_height();
 
-	int w_mm = tfb_screen_width_mm();
-	int h_mm = tfb_screen_height_mm();
-	// If DPI is specified on cmdline then calculate display size from it
-	// otherwise calculate the dpi based on the display size.
-	if (dpi > 0) {
-		w_mm = screenWidth / (float)dpi * 25.4;
-		h_mm = screenHeight / (float)dpi * 25.4;
-	} else {
-		dpi = (float)screenWidth / (float)w_mm * 25.4;
-	}
-	int pixels_per_milli = (float)screenWidth / (float)w_mm;
+	calculate_dpi_info(&dpi_info);
 
-	if (logo_size_max * pixels_per_milli > screenWidth)
-		logo_size_max = (screenWidth * 0.75f) / pixels_per_milli;
-
-	float logo_size_px = (float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
-	if (w_mm > 0 && h_mm > 0) {
-		if (w_mm < h_mm) {
-			if (w_mm > logo_size_max * 1.2f)
-				logo_size_px = logo_size_max *
-					       pixels_per_milli;
-		} else {
-			if (h_mm > logo_size_max * 1.2f)
-				logo_size_px = logo_size_max *
-					       pixels_per_milli;
-		}
-	}
-
-	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth, screenHeight, w_mm, h_mm,
-	    dpi, logo_size_px);
-
-	image = nsvgParseFromFile(splash_image, "", logo_size_px);
+	image = nsvgParseFromFile(splash_image, "", dpi_info.logo_size_px);
 	if (!image) {
 		fprintf(stderr, "failed to load SVG image\n");
 		rc = 1;
@@ -354,17 +388,18 @@ int main(int argc, char **argv)
 	}
 
 	if (image->width < image->height * 1.5)
-		logo_size_px = MM_TO_PX(dpi, 25);
+		dpi_info.logo_size_px = MM_TO_PX(dpi_info.dpi, 25);
 
 	float sz =
-		(float)logo_size_px /
+		(float)dpi_info.logo_size_px /
 		(image->width > image->height ? image->height : image->width);
 	float image_w = image->width * sz + 0.5;
 	float image_h = image->height * sz + 0.5;
-	if (image_w > (logo_size_max * pixels_per_milli)) {
-		float scalefactor = ((float)(logo_size_max * pixels_per_milli)/ image_w);
+	if (image_w > (dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli)) {
+		float scalefactor =
+			((float)(dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli) / image_w);
 		printf("Got scale factor: %f\n", scalefactor);
-		image_w = logo_size_max * pixels_per_milli;
+		image_w = dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli;
 		image_h *= scalefactor;
 	}
 	float x = (float)screenWidth / 2;
@@ -372,7 +407,7 @@ int main(int argc, char **argv)
 	// Center the image
 	x -= image_w * 0.5f;
 	y -= image_h * 0.5f;
-	float animation_y = y + image_h + MM_TO_PX(dpi, 5);
+	float animation_y = y + image_h + MM_TO_PX(dpi_info.dpi, 5);
 
 	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
 					background_color.b));
@@ -380,7 +415,8 @@ int main(int argc, char **argv)
 	draw_svg(image, x, y, image_w, image_h);
 
 	if (message || message_bottom) {
-		int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi, 5);
+		int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi_info.dpi, 6);
+		int bottomTextOffset = MM_TO_PX(dpi_info.dpi, 3);
 		float fontsz;
 		int tx, ty;
 
@@ -393,33 +429,34 @@ int main(int argc, char **argv)
 
 		if (message_bottom) {
 			fontsz = ((float)font_size_b * PT_TO_MM) /
-				(font->fontAscent - font->fontDescent) *
-				pixels_per_milli;
+				 (font->fontAscent - font->fontDescent) *
+				 dpi_info.pixels_per_milli;
 
-			message_bottom = getTextDimensions(font, message_bottom, fontsz,
-					&textWidth, &bottomTextHeight);
+			message_bottom = getTextDimensions(font, message_bottom,
+							   fontsz, &textWidth,
+							   &bottomTextHeight);
 			tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = screenHeight - bottomTextHeight - MM_TO_PX(dpi, 2);
-			draw_text(font, message_bottom, tx, ty, screenWidth,
-				bottomTextHeight, fontsz, tfb_gray);
+			ty = screenHeight - bottomTextHeight - bottomTextOffset;
+			draw_text(font, message_bottom, tx, ty, textWidth,
+				  bottomTextHeight, fontsz, tfb_gray);
 		}
 
 		if (message) {
 			fontsz = ((float)font_size * PT_TO_MM) /
-				(font->fontAscent - font->fontDescent) *
-				pixels_per_milli;
+				 (font->fontAscent - font->fontDescent) *
+				 dpi_info.pixels_per_milli;
 			LOG("Fontsz: %f\n", fontsz);
-			message = getTextDimensions(font, message, fontsz, &textWidth,
-					&textHeight);
+			message = getTextDimensions(font, message, fontsz,
+						    &textWidth, &textHeight);
 
 			tx = screenWidth / 2.f - textWidth / 2.f;
-			ty = screenHeight - bottomTextHeight - MM_TO_PX(dpi, font_size_b * PT_TO_MM * 2) - textHeight;
+			ty = (screenHeight - bottomTextHeight - bottomTextOffset) -
+			     MM_TO_PX(dpi_info.dpi, font_size_b * PT_TO_MM) -
+			     textHeight;
 
-			draw_text(font, message, tx, ty, textWidth, textHeight, fontsz,
-				tfb_gray);
+			draw_text(font, message, tx, ty, textWidth, textHeight,
+				  fontsz, tfb_gray);
 		}
-
-
 	}
 
 	tfb_flush_window();
@@ -436,7 +473,7 @@ int main(int argc, char **argv)
 			sleep(1);
 			continue;
 		}
-		animate_frame(frame++, screenWidth, animation_y, dpi);
+		animate_frame(frame++, screenWidth, animation_y, dpi_info.dpi);
 		tfb_flush_fb();
 	}
 

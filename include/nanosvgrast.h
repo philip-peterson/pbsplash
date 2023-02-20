@@ -1420,7 +1420,8 @@ void nsvgRasterizeText(NSVGrasterizer* r,
 			continue;
 
 		if (i == 0 && strcmp(shape->id, "OpenSansRegular") == 0)
-			tx -= shape->horizAdvX * scale;
+			tx = xStart - charWidth;
+			//tx -= shape->horizAdvX * scale * 0.5;
 
 		if (shape->fill.type != NSVG_PAINT_NONE) {
 			nsvg__resetPool(r);

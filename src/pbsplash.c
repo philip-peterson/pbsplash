@@ -16,12 +16,12 @@
 #define NANOSVG_ALL_COLOR_KEYWORDS // Include full list of color keywords.
 #include "nanosvg.h"
 #include "nanosvgrast.h"
-
+#include "timespec.h"
 #include "pbsplash.h"
 
 #define MSG_MAX_LEN	  4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
-#define LOGO_SIZE_MAX_MM  40
+#define LOGO_SIZE_MAX_MM  45
 #define FONT_SIZE_PT	  9
 #define FONT_SIZE_B_PT	  6
 #define B_MESSAGE_OFFSET_MM  3
@@ -172,7 +172,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 
 	char *out_text = zalloc(strlen(text) + 1);
 
-	*width = font->defaultHorizAdv * scale;
+	*width = 2; //font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
 	*height = fontHeight;
 
@@ -195,7 +195,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 		}
 
 		if (shape) {
-			*width += (float)shapes[i]->horizAdvX * scale + 2;
+			*width += (float)shapes[i]->horizAdvX * scale;
 		} else {
 			*width += font->defaultHorizAdv * scale;
 		}
@@ -547,19 +547,36 @@ no_messages:
 	tfb_flush_window();
 	tfb_flush_fb();
 
-	int frame = 0;
+	int tick = 0;
 	int tty = open(active_tty, O_RDWR);
 	if (!tty) {
 		fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
 		goto out;
 	}
+
+	struct timespec epoch, start, end, diff;
+	int target_fps = 60;
+	float tickrate = 60.0;
+	clock_gettime(CLOCK_REALTIME, &epoch);
 	while (!terminate) {
 		if (!animation) {
 			sleep(1);
 			continue;
 		}
-		animate_frame(frame++, screenWidth, animation_y, dpi_info.dpi);
+		clock_gettime(CLOCK_REALTIME, &start);
+		tick = timespec_to_double(timespec_sub(start, epoch)) * tickrate;
+		animate_frame(tick, screenWidth, animation_y, dpi_info.dpi);
 		tfb_flush_fb();
+		clock_gettime(CLOCK_REALTIME, &end);
+		diff = timespec_sub(end, start);
+		//printf("%05d: %09ld\n", tick, diff.tv_nsec);
+		if (diff.tv_nsec < 1000000000 / target_fps) {
+			struct timespec sleep_time = {
+				.tv_sec = 0,
+				.tv_nsec = 1000000000 / target_fps - diff.tv_nsec,
+			};
+			nanosleep(&sleep_time, NULL);
+		}
 	}
 
 out:

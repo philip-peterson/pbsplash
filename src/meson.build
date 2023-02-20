@@ -1,6 +1,7 @@
 src = [
         'animate.c',
         'nanosvg.c',
+        'timespec.c',
         'pbsplash.c',
 ]
 

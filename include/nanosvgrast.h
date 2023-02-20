@@ -67,7 +67,7 @@ void nsvgDeleteRasterizer(NSVGrasterizer*);
 
 
 void nsvgRasterizeText(NSVGrasterizer* r,
-				   NSVGimage* font, float tx, float ty, float scale,
+				   const NSVGimage* font, float tx, float ty, float scale,
 				   unsigned char* dst, int w, int h, int stride,
 				   const char* text);
 
@@ -1369,7 +1369,7 @@ static void dumpEdges(NSVGrasterizer* r, const char* name)
 */
 
 void nsvgRasterizeText(NSVGrasterizer* r,
-				   NSVGimage* font, float tx, float ty, float scale,
+				   const NSVGimage* font, float tx, float ty, float scale,
 				   unsigned char* dst, int w, int h, int stride,
 				   const char* text)
 {

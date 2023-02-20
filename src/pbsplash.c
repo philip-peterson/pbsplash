@@ -24,12 +24,11 @@
 #define LOGO_SIZE_MAX_MM  40
 #define FONT_SIZE_PT	  9
 #define FONT_SIZE_B_PT	  6
+#define B_MESSAGE_OFFSET_MM  3
 #define PT_TO_MM	  0.38f
 #define TTY_PATH_LEN	  11
 
 #define DEBUGRENDER	  0
-
-#define MM_TO_PX(dpi, mm) (dpi / 25.4) * (mm)
 
 volatile sig_atomic_t terminate = 0;
 
@@ -38,13 +37,15 @@ struct col background_color = { .r = 0, .g = 0, .b = 0, .a = 255 };
 
 static int screenWidth, screenHeight;
 
+#define zalloc(size) calloc(1, size)
+
 #define LOG(fmt, ...)                                                          \
 	do {                                                                   \
 		if (debug)                                                     \
 			printf(fmt, ##__VA_ARGS__);                            \
 	} while (0)
 
-int usage()
+static int usage()
 {
 	// clang-format off
 	fprintf(stderr, "pbsplash: postmarketOS bootsplash generator\n");
@@ -68,7 +69,7 @@ int usage()
 	return 1;
 }
 
-void term(int signum)
+static void term(int signum)
 {
 	terminate = 1;
 }
@@ -125,9 +126,9 @@ static void blit_buf(unsigned char *buf, int x, int y, int w, int h, bool vflip,
 static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 {
 	float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
-	LOG("draw_svg: %dx%d, %dx%d, %f\n", x, y, w, h, sz);
+	LOG("draw_svg: (%d, %d), %dx%d, %f\n", x, y, w, h, sz);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
-	unsigned char *img = malloc(w * h * 4);
+	unsigned char *img = zalloc(w * h * 4);
 	nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
 
 	blit_buf(img, x, y, w, h, false, false);
@@ -136,13 +137,13 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 	nsvgDeleteRasterizer(rast);
 }
 
-static void draw_text(NSVGimage *font, const char *text, int x, int y, int width,
+static void draw_text(const NSVGimage *font, const char *text, int x, int y, int width,
 		      int height, float scale, unsigned int tfb_col)
 {
 	LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
 	    scale, x, y, width, height);
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
-	unsigned char *img = malloc(width * height * 4);
+	unsigned char *img = zalloc(width * height * 4);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
 
 	nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height,
@@ -159,7 +160,7 @@ static void draw_text(NSVGimage *font, const char *text, int x, int y, int width
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
  */
-static const char *getTextDimensions(NSVGimage *font, const char *text, float scale,
+static const char *getTextDimensions(const NSVGimage *font, const char *text, float scale,
 			       int *width, int *height)
 {
 	int i;
@@ -169,7 +170,7 @@ static const char *getTextDimensions(NSVGimage *font, const char *text, float sc
 	if (text == NULL)
 		return text;
 
-	char *out_text = malloc(strlen(text));
+	char *out_text = zalloc(strlen(text) + 1);
 
 	*width = font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
@@ -211,8 +212,6 @@ struct dpi_info {
 	int pixels_per_milli;
 	float logo_size_px;
 	int logo_size_max_mm;
-	int font_size;
-	int font_size_b; // Bottom text font size
 };
 
 static void calculate_dpi_info(struct dpi_info *dpi_info)
@@ -268,54 +267,123 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 	    screenHeight, w_mm, h_mm, dpi_info->dpi, dpi_info->logo_size_px);
 }
 
-int show_messages(const struct dpi_info *dpi_info, const char *font_path, const char *message, const char *message_bottom)
-{
-	int textWidth, textHeight, bottomTextHeight = MM_TO_PX(dpi_info->dpi, 6);
-	int bottomTextOffset = MM_TO_PX(dpi_info->dpi, 3);
-	NSVGimage *font = NULL;
+struct msg_info {
+	const char *src_message;
+	const char *message;
+	int x;
+	int y;
+	int width;
+	int height;
 	float fontsz;
-	int tx, ty;
+};
 
-	font = nsvgParseFromFile(font_path, "px", 512);
-	if (!font || !font->shapes) {
+static void load_message(struct msg_info *msg_info, const struct dpi_info *dpi_info, float font_size_pt, const NSVGimage *font)
+{
+	msg_info->fontsz = (font_size_pt * PT_TO_MM) /
+			(font->fontAscent - font->fontDescent) *
+			dpi_info->pixels_per_milli;
+	msg_info->message = getTextDimensions(font, msg_info->src_message, msg_info->fontsz, &msg_info->width, &msg_info->height);
+	msg_info->x = (screenWidth - msg_info->width) / 2;
+	// Y coordinate is set later
+}
+
+static void free_message(struct msg_info *msg_info)
+{
+	if (!msg_info)
+		return;
+	if (msg_info->message && msg_info->message != msg_info->src_message)
+		free((void *)msg_info->message);
+}
+
+struct messages {
+	const char *font_path;
+	NSVGimage *font;
+	int font_size_pt;
+	int font_size_b_pt;
+	struct msg_info *msg;
+	struct msg_info *bottom_msg;
+};
+
+static inline void show_message(const struct msg_info *msg_info, const NSVGimage *font)
+{
+	draw_text(font, msg_info->message, msg_info->x, msg_info->y, msg_info->width,
+				msg_info->height, msg_info->fontsz, tfb_gray);
+}
+
+static void show_messages(struct messages *msgs, const struct dpi_info *dpi_info)
+{
+	static bool font_failed = false;
+	if (font_failed)
+		return;
+
+	if (!msgs->font)
+		msgs->font = nsvgParseFromFile(msgs->font_path, "px", 512);
+	if (!msgs->font || !msgs->font->shapes) {
+		font_failed = true;
 		fprintf(stderr, "failed to load SVG font, can't render messages\n");
+		fprintf(stderr, "  font_path: %s\n", msgs->font_path);
+		fprintf(stderr, "msg: %s\n\nbottom_message: %s\n", msgs->msg->src_message, msgs->bottom_msg->src_message);
+		return;
+	}
+
+	if (msgs->bottom_msg) {
+		if (!msgs->bottom_msg->message) {
+			load_message(msgs->bottom_msg, dpi_info, msgs->font_size_b_pt, msgs->font);
+			msgs->bottom_msg->y = screenHeight - msgs->bottom_msg->height - MM_TO_PX(dpi_info->dpi, B_MESSAGE_OFFSET_MM);
+		}
+		show_message(msgs->bottom_msg, msgs->font);
+	}
+
+	if (msgs->msg) {
+		if (!msgs->msg->message) {
+			load_message(msgs->msg, dpi_info, msgs->font_size_pt, msgs->font);
+			if (msgs->bottom_msg)
+				msgs->msg->y = msgs->bottom_msg->y - msgs->msg->height - (MM_TO_PX(dpi_info->dpi, msgs->font_size_b_pt * PT_TO_MM) * 0.6);
+			else
+				msgs->msg->y = screenHeight - msgs->msg->height - (MM_TO_PX(dpi_info->dpi, msgs->font_size_pt * PT_TO_MM) * 2);
+		}
+		show_message(msgs->msg, msgs->font);
+	}
+}
+
+struct image_info {
+	const char *path;
+	NSVGimage *image;
+	float width;
+	float height;
+	float x;
+	float y;
+};
+
+static int load_image(const struct dpi_info *dpi_info, struct image_info *image_info)
+{
+	int logo_size_px = dpi_info->logo_size_px;
+
+	image_info->image = nsvgParseFromFile(image_info->path, "", logo_size_px);
+	if (!image_info->image) {
+		fprintf(stderr, "failed to load SVG image\n");
+		fprintf(stderr, "  image path: %s\n", image_info->path);
 		return 1;
 	}
 
-	if (message_bottom) {
-		fontsz = ((float)dpi_info->font_size_b * PT_TO_MM) /
-				(font->fontAscent - font->fontDescent) *
-				dpi_info->pixels_per_milli;
+	// For taller images make sure they don't get too wide
+	if (image_info->image->width < image_info->image->height * 1.1)
+		logo_size_px = MM_TO_PX(dpi_info->dpi, 25);
 
-		const char *text = getTextDimensions(font, message_bottom,
-							fontsz, &textWidth,
-							&bottomTextHeight);
-		tx = screenWidth / 2.f - textWidth / 2.f;
-		ty = screenHeight - bottomTextHeight - bottomTextOffset;
-		draw_text(font, text, tx, ty, textWidth,
-				bottomTextHeight, fontsz, tfb_gray);
-		if (text != message_bottom)
-			free((void *)text);
+	float sz =
+		(float)logo_size_px /
+		(image_info->image->width > image_info->image->height ? image_info->image->height : image_info->image->width);
+	image_info->width = image_info->image->width * sz + 0.5;
+	image_info->height = image_info->image->height * sz + 0.5;
+	if (image_info->width > (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli)) {
+		float scalefactor =
+			((float)(dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli) / image_info->width);
+		printf("Got scale factor: %f\n", scalefactor);
+		image_info->width = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
+		image_info->height *= scalefactor;
 	}
-
-	if (message) {
-		fontsz = ((float)dpi_info->font_size * PT_TO_MM) /
-				(font->fontAscent - font->fontDescent) *
-				dpi_info->pixels_per_milli;
-		LOG("Fontsz: %f\n", fontsz);
-		const char *text = getTextDimensions(font, message, fontsz,
-						&textWidth, &textHeight);
-
-		tx = screenWidth / 2.f - textWidth / 2.f;
-		ty = (screenHeight - bottomTextHeight - bottomTextOffset) -
-			MM_TO_PX(dpi_info->dpi, dpi_info->font_size_b * PT_TO_MM) -
-			textHeight;
-
-		draw_text(font, message, tx, ty, textWidth, textHeight,
-				fontsz, tfb_gray);
-		if (text != message)
-			free((void *)text);
-	}
+	image_info->x = (float)screenWidth / 2 - image_info->width * 0.5f;
+	image_info->y = (float)screenHeight / 2 - image_info->height * 0.5f;
 
 	return 0;
 }
@@ -325,19 +393,28 @@ int main(int argc, char **argv)
 	int rc = 0;
 	char *message = NULL;
 	char *message_bottom = NULL;
-	char *splash_image = NULL;
-	char *font_path = DEFAULT_FONT_PATH;
 	char active_tty[TTY_PATH_LEN + 1];
-	NSVGimage *image = NULL;
-	NSVGimage *font = NULL;
 	struct sigaction action;
+	struct messages msgs = {
+		.font_path = DEFAULT_FONT_PATH,
+		.font_size_pt = FONT_SIZE_PT,
+		.font_size_b_pt = FONT_SIZE_B_PT,
+		.msg = NULL,
+		.bottom_msg = NULL,
+	};
 	struct dpi_info dpi_info = {
 		.dpi = 0,
 		.pixels_per_milli = 0,
 		.logo_size_px = 0,
 		.logo_size_max_mm = LOGO_SIZE_MAX_MM,
-		.font_size = FONT_SIZE_PT,
-		.font_size_b = FONT_SIZE_B_PT,
+	};
+	struct image_info image_info = {
+		.path = NULL,
+		.image = NULL,
+		.width = 0,
+		.height = 0,
+		.x = 0,
+		.y = 0,
 	};
 	int optflag;
 	bool animation = true;
@@ -359,19 +436,21 @@ int main(int argc, char **argv)
 			debug = true;
 			break;
 		case 'f':
-			font_path = optarg;
+			msgs.font_path = optarg;
 			break;
 		case 's':
-			splash_image = optarg;
+			image_info.path = optarg;
 			break;
 		case 'm':
-			message = optarg;
+			message = malloc(strlen(optarg) + 1);
+			strcpy(message, optarg);
 			break;
 		case 'b':
-			message_bottom = optarg;
+			message_bottom = malloc(strlen(optarg) + 1);
+			strcpy(message_bottom, optarg);
 			break;
 		case 'o':
-			dpi_info.font_size_b = strtof(optarg, &end);
+			msgs.font_size_b_pt = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid font size: %s\n",
 					optarg);
@@ -379,7 +458,7 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 'p':
-			dpi_info.font_size = strtof(optarg, &end);
+			msgs.font_size_pt = strtof(optarg, &end);
 			if (end == optarg) {
 				fprintf(stderr, "Invalid font size: %s\n",
 					optarg);
@@ -435,43 +514,36 @@ int main(int argc, char **argv)
 
 	calculate_dpi_info(&dpi_info);
 
-	image = nsvgParseFromFile(splash_image, "", dpi_info.logo_size_px);
-	if (!image) {
-		fprintf(stderr, "failed to load SVG image\n");
-		rc = 1;
+	rc = load_image(&dpi_info, &image_info);
+	if (rc)
 		goto out;
-	}
 
-	if (image->width < image->height * 1.5)
-		dpi_info.logo_size_px = MM_TO_PX(dpi_info.dpi, 25);
-
-	float sz =
-		(float)dpi_info.logo_size_px /
-		(image->width > image->height ? image->height : image->width);
-	float image_w = image->width * sz + 0.5;
-	float image_h = image->height * sz + 0.5;
-	if (image_w > (dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli)) {
-		float scalefactor =
-			((float)(dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli) / image_w);
-		printf("Got scale factor: %f\n", scalefactor);
-		image_w = dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli;
-		image_h *= scalefactor;
-	}
-	float x = (float)screenWidth / 2;
-	float y = (float)screenHeight / 2;
-	// Center the image
-	x -= image_w * 0.5f;
-	y -= image_h * 0.5f;
-	float animation_y = y + image_h + MM_TO_PX(dpi_info.dpi, 5);
+	float animation_y = image_info.y + image_info.height + MM_TO_PX(dpi_info.dpi, 5);
 
 	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
 					background_color.b));
 
-	draw_svg(image, x, y, image_w, image_h);
+	draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
 
-	if (message || message_bottom)
-		show_messages(&dpi_info, font_path, message, message_bottom);
+	if (!message && !message_bottom)
+		goto no_messages;
 
+	struct msg_info bottom_msg, msg;
+
+	memset(&bottom_msg, 0, sizeof(bottom_msg));
+	memset(&msg, 0, sizeof(msg));
+
+	bottom_msg.src_message = message_bottom;
+	msg.src_message = message;
+
+	if (message_bottom)
+		msgs.bottom_msg = &bottom_msg;
+	if (message)
+		msgs.msg = &msg;
+
+	show_messages(&msgs, &dpi_info);
+
+no_messages:
 	tfb_flush_window();
 	tfb_flush_fb();
 
@@ -492,13 +564,22 @@ int main(int argc, char **argv)
 
 out:
 	// Before we exit print the logo so it will persist
-	if (image) {
+	if (image_info.image) {
 		ioctl(tty, KDSETMODE, KD_TEXT);
-		draw_svg(image, x, y, image_w, image_h);
+		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
 	}
 
-	nsvgDelete(font);
-	nsvgDelete(image);
+	// Draw the messages again so they will persist
+	show_messages(&msgs, &dpi_info);
+
+	nsvgDelete(image_info.image);
+	nsvgDelete(msgs.font);
+	free_message(msgs.msg);
+	free_message(msgs.bottom_msg);
+	if (message)
+		free(message);
+	if (message_bottom)
+		free(message_bottom);
 	// The TTY might end up in a weird state if this
 	// is not called!
 	tfb_release_fb();

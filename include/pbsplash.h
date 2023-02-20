@@ -1,6 +1,8 @@
 #ifndef __pbsplash_h__
 #define __pbsplash_h__
 
+#define MM_TO_PX(dpi, mm) (dpi / 25.4) * (mm)
+
 struct col {
    union {
       unsigned int rgba;

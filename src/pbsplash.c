@@ -220,13 +220,7 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 	int h_mm = tfb_screen_height_mm();
 
 	if ((w_mm < 1 || h_mm < 1) && !dpi_info->dpi) {
-		FILE *fp = fopen("/dev/kmsg", "w");
-		if (fp != NULL) {
-			fprintf(fp, "PBSPLASH: Invalid screen size: %dx%d\n",
-				w_mm, h_mm);
-			fclose(fp);
-		}
-		fprintf(stderr, "Invalid screen size: %dx%d\n", w_mm, h_mm);
+		fprintf(stderr, "ERROR!!!: Invalid screen size: %dx%d\n", w_mm, h_mm);
 
 		// Assume a dpi of 300
 		// This should be readable everywhere
@@ -263,7 +257,7 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 		}
 	}
 
-	LOG("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
+	printf("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
 	    screenHeight, w_mm, h_mm, dpi_info->dpi, dpi_info->logo_size_px);
 }
 
@@ -378,7 +372,7 @@ static int load_image(const struct dpi_info *dpi_info, struct image_info *image_
 	if (image_info->width > (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli)) {
 		float scalefactor =
 			((float)(dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli) / image_info->width);
-		printf("Got scale factor: %f\n", scalefactor);
+		//printf("Got scale factor: %f\n", scalefactor);
 		image_info->width = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		image_info->height *= scalefactor;
 	}
@@ -475,7 +469,7 @@ int main(int argc, char **argv)
 			break;
 		case 'd':
 			dpi_info.dpi = strtol(optarg, &end, 10);
-			if (end == optarg) {
+			if (end == optarg || dpi_info.dpi < 0) {
 				fprintf(stderr, "Invalid dpi: %s\n", optarg);
 				return usage();
 			}

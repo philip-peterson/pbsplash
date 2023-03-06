@@ -156,6 +156,15 @@ static void draw_text(const NSVGimage *font, const char *text, int x, int y, int
 	nsvgDeleteRasterizer(rast);
 }
 
+static inline float getShapeWidth(const NSVGimage *font, const NSVGshape *shape)
+{
+	if (shape) {
+		return shape->horizAdvX;
+	} else {
+		return font->defaultHorizAdv;
+	}
+}
+
 /*
  * Get the dimensions of a string in pixels.
  * based on the font size and the font SVG file.
@@ -163,46 +172,70 @@ static void draw_text(const NSVGimage *font, const char *text, int x, int y, int
 static const char *getTextDimensions(const NSVGimage *font, const char *text, float scale,
 			       int *width, int *height)
 {
-	int i;
+	int i, j;
 	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
 	int maxWidth = 0;
 
 	if (text == NULL)
 		return text;
 
-	char *out_text = zalloc(strlen(text) + 1);
+	// Pre-allocate 3x the size to account for any word splitting
+	char *out_text = zalloc(strlen(text) * 3 + 1);
 
-	*width = 2; //font->defaultHorizAdv * scale;
+	*width = 2; // font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
 	*height = fontHeight;
 
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
+	bool line_has_space = false;
 	// Iterate over every glyph in the string to get the total width
-	for (i = 0; text[i] != '\0'; i++) {
+	// and handle line-splitting
+	for (i = 0, j = 0; text[i] != '\0'; i++, j++) {
 		NSVGshape *shape = shapes[i];
-		out_text[i] = text[i];
+		out_text[j] = text[i];
 		if (*width > screenWidth * 0.95) {
-			while (out_text[i] != ' ' && i > 0)
+			if (!line_has_space)
 				i--;
-			out_text[i] = '\n';
+			if (!line_has_space) {
+				if (i < 1) {
+					fprintf(stderr,
+					"ERROR: Text is too long to fit on screen!");
+					goto out;
+				}
+			} else {
+				int old_j = j;
+				while (out_text[j] != ' ' && j > 0) {
+					j--;
+				}
+				i = i - (old_j - j);
+				if (i <= 0) {
+					line_has_space = false;
+					fprintf(stderr,
+					"ERROR: Text is too long to fit on screen!");
+					goto out;
+				}
+			}
+			out_text[j] = '\n';
 		}
 
-		if (out_text[i] == '\n') {
+		if (out_text[j] == '\n') {
+			printf("LINE SPLIT, %d %s\n", i, out_text);
+			line_has_space = false;
 			*height += fontHeight;
 			maxWidth = *width > maxWidth ? *width : maxWidth;
 			*width = 0;
 			continue;
+		} else if (text[i] == ' ') {
+			printf("SPACE! %s\n", out_text);
+			line_has_space = true;
 		}
 
-		if (shape) {
-			*width += (float)shapes[i]->horizAdvX * scale;
-		} else {
-			*width += font->defaultHorizAdv * scale;
-		}
+		*width += round(getShapeWidth(font, shape) * scale);
 	}
 
 	*width = *width > maxWidth ? *width : maxWidth;
 
+out:
 	free(shapes);
 	return out_text;
 }

@@ -32,10 +32,12 @@
 
 volatile sig_atomic_t terminate = 0;
 
-bool debug = false;
+bool debug = true;
 struct col background_color = { .r = 0, .g = 0, .b = 0, .a = 255 };
 
 static int screenWidth, screenHeight;
+
+static struct dpi_info dpi_info = { .logo_size_max_mm = LOGO_SIZE_MAX_MM };
 
 #define zalloc(size) calloc(1, size)
 
@@ -80,6 +82,7 @@ static void blit_buf(unsigned char *buf, int x, int y, int w, int h, bool vflip,
 	struct col prev_col = { .r = 0, .g = 0, .b = 0, .a = 0 };
 	unsigned int col = tfb_make_color(
 		background_color.r, background_color.g, background_color.b);
+	tfb_fill_rect(x, y, w, h, col);
 
 	for (size_t i = 0; i < w; i++) {
 		for (size_t j = 0; j < h; j++) {
@@ -123,14 +126,14 @@ static void blit_buf(unsigned char *buf, int x, int y, int w, int h, bool vflip,
 	}
 }
 
-static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
+void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 {
 	float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
-	LOG("draw_svg: (%d, %d), %dx%d, %f\n", x, y, w, h, sz);
+	//LOG("draw_svg: (%d, %d), %dx%d, %f\n", x, y, w, h, sz);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
 	unsigned char *img = zalloc(w * h * 4);
+	//blit_buf(img, x, y, w, h, false, false);
 	nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
-
 	blit_buf(img, x, y, w, h, false, false);
 
 	free(img);
@@ -240,19 +243,15 @@ out:
 	return out_text;
 }
 
-struct dpi_info {
-	long dpi;
-	int pixels_per_milli;
-	float logo_size_px;
-	int logo_size_max_mm;
-};
-
-static void calculate_dpi_info(struct dpi_info *dpi_info)
+struct dpi_info *calculate_dpi_info()
 {
+	if (dpi_info.logo_size_px)
+		return &dpi_info;
+
 	int w_mm = tfb_screen_width_mm();
 	int h_mm = tfb_screen_height_mm();
 
-	if ((w_mm < 1 || h_mm < 1) && !dpi_info->dpi) {
+	if ((w_mm < 1 || h_mm < 1) && !dpi_info.dpi) {
 		fprintf(stderr, "ERROR!!!: Invalid screen size: %dx%d\n", w_mm, h_mm);
 
 		// Assume a dpi of 300
@@ -260,38 +259,40 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 		// Except ridiculous HiDPI displays
 		// which honestly should expose their physical
 		// dimensions....
-		dpi_info->dpi = 300;
+		dpi_info.dpi = 300;
 	}
 
 	// If DPI is specified on cmdline then calculate display size from it
 	// otherwise calculate the dpi based on the display size.
-	if (dpi_info->dpi > 0) {
-		w_mm = screenWidth / (float)dpi_info->dpi * 25.4;
-		h_mm = screenHeight / (float)dpi_info->dpi * 25.4;
+	if (dpi_info.dpi > 0) {
+		w_mm = screenWidth / (float)dpi_info.dpi * 25.4;
+		h_mm = screenHeight / (float)dpi_info.dpi * 25.4;
 	} else {
-		dpi_info->dpi = (float)screenWidth / (float)w_mm * 25.4;
+		dpi_info.dpi = (float)screenWidth / (float)w_mm * 25.4;
 	}
-	dpi_info->pixels_per_milli = (float)screenWidth / (float)w_mm;
+	dpi_info.pixels_per_milli = (float)screenWidth / (float)w_mm;
 
-	if (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli > screenWidth)
-		dpi_info->logo_size_max_mm = (screenWidth * 0.75f) / dpi_info->pixels_per_milli;
+	if (dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli > screenWidth)
+		dpi_info.logo_size_max_mm = (screenWidth * 0.75f) / dpi_info.pixels_per_milli;
 
-	dpi_info->logo_size_px =
+	dpi_info.logo_size_px =
 		(float)(screenWidth < screenHeight ? screenWidth :
 						     screenHeight) *
 		0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
-			if (w_mm > dpi_info->logo_size_max_mm * 1.2f)
-				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
+			if (w_mm > dpi_info.logo_size_max_mm * 1.2f)
+				dpi_info.logo_size_px = dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli;
 		} else {
-			if (h_mm > dpi_info->logo_size_max_mm * 1.2f)
-				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
+			if (h_mm > dpi_info.logo_size_max_mm * 1.2f)
+				dpi_info.logo_size_px = dpi_info.logo_size_max_mm * dpi_info.pixels_per_milli;
 		}
 	}
 
 	printf("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
-	    screenHeight, w_mm, h_mm, dpi_info->dpi, dpi_info->logo_size_px);
+	    screenHeight, w_mm, h_mm, dpi_info.dpi, dpi_info.logo_size_px);
+	
+	return &dpi_info;
 }
 
 struct msg_info {
@@ -373,35 +374,31 @@ static void show_messages(struct messages *msgs, const struct dpi_info *dpi_info
 	}
 }
 
-struct image_info {
-	const char *path;
-	NSVGimage *image;
-	float width;
-	float height;
-	float x;
-	float y;
-};
-
-static int load_image(const struct dpi_info *dpi_info, struct image_info *image_info)
+int load_image(const struct dpi_info *dpi_info, struct image_info *image_info, int i)
 {
-	int logo_size_px = dpi_info->logo_size_px;
+	int logo_size_px = dpi_info->logo_size_px;	
 
-	image_info->image = nsvgParseFromFile(image_info->path, "", logo_size_px);
-	if (!image_info->image) {
+	image_info->image[i] = nsvgParseFromFile(image_info->path[i], "", logo_size_px);
+	if (!image_info->image[i] && i == 0) {
 		fprintf(stderr, "failed to load SVG image\n");
-		fprintf(stderr, "  image path: %s\n", image_info->path);
+		fprintf(stderr, "  image path: %s\n", image_info->path[i]);
+		return 1;
+	} else if (!image_info->image[i]) {
 		return 1;
 	}
 
 	// For taller images make sure they don't get too wide
-	if (image_info->image->width < image_info->image->height * 1.1)
+	if (image_info->image[i]->width < image_info->image[i]->height * 1.1)
 		logo_size_px = MM_TO_PX(dpi_info->dpi, 25);
+
+	if (i > 0)
+		return 0;
 
 	float sz =
 		(float)logo_size_px /
-		(image_info->image->width > image_info->image->height ? image_info->image->height : image_info->image->width);
-	image_info->width = image_info->image->width * sz + 0.5;
-	image_info->height = image_info->image->height * sz + 0.5;
+		(image_info->image[i]->width > image_info->image[i]->height ? image_info->image[i]->height : image_info->image[i]->width);
+	image_info->width = image_info->image[i]->width * sz + 0.5;
+	image_info->height = image_info->image[i]->height * sz + 0.5;
 	if (image_info->width > (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli)) {
 		float scalefactor =
 			((float)(dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli) / image_info->width);
@@ -411,6 +408,46 @@ static int load_image(const struct dpi_info *dpi_info, struct image_info *image_
 	}
 	image_info->x = (float)screenWidth / 2 - image_info->width * 0.5f;
 	image_info->y = (float)screenHeight / 2 - image_info->height * 0.5f;
+
+	return 0;
+}
+
+/* strdup and increment a 2 digit number in the string at offset */
+static char *strdupinc(const char *s, int i)
+{
+	char *n = NULL;
+	char *base = zalloc(strlen(s));
+
+	LOG("%d, %s\n", i, s);
+
+	n = strstr(s, "01");
+
+	memcpy(base, s, strlen(s));	
+	int len = strlen(s) - strlen(n);
+	base[len] = '0' + (i/10);
+	base[len + 1] = '1' + (i%10);
+
+	return base;
+}
+
+int load_images(const struct dpi_info *dpi_info, struct image_info *image_info)
+{
+	if (strlen(image_info->path[0]) < 6) {
+		fprintf(stderr, "invalid image path\n");
+		return 1;
+	}
+
+	for (int i = 0; i < MAX_FRAMES; i++) {
+		if (i > 0)
+			image_info->path[i] = strdupinc(image_info->path[0], i);
+		if (load_image(dpi_info, image_info, i)) {
+			free(image_info->path[i]);
+			break;
+		}
+		image_info->num_frames++;
+	}
+
+	LOG("num_frames: %d\n", image_info->num_frames);
 
 	return 0;
 }
@@ -429,15 +466,9 @@ int main(int argc, char **argv)
 		.msg = NULL,
 		.bottom_msg = NULL,
 	};
-	struct dpi_info dpi_info = {
-		.dpi = 0,
-		.pixels_per_milli = 0,
-		.logo_size_px = 0,
-		.logo_size_max_mm = LOGO_SIZE_MAX_MM,
-	};
 	struct image_info image_info = {
-		.path = NULL,
-		.image = NULL,
+		.path = { },
+		.image = { },
 		.width = 0,
 		.height = 0,
 		.x = 0,
@@ -466,7 +497,7 @@ int main(int argc, char **argv)
 			msgs.font_path = optarg;
 			break;
 		case 's':
-			image_info.path = optarg;
+			image_info.path[0] = strdup(optarg);
 			break;
 		case 'm':
 			message = malloc(strlen(optarg) + 1);
@@ -528,7 +559,7 @@ int main(int argc, char **argv)
 
 	LOG("active tty: '%s'\n", active_tty);
 
-	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0",
+	if ((rc = tfb_acquire_fb(TFB_FL_USE_DOUBLE_BUFFER, "/dev/fb0",
 				 active_tty)) != TFB_SUCCESS) {
 		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n",
 			rc);
@@ -539,18 +570,18 @@ int main(int argc, char **argv)
 	screenWidth = (int)tfb_screen_width();
 	screenHeight = (int)tfb_screen_height();
 
-	calculate_dpi_info(&dpi_info);
+	struct dpi_info *dpi_info = calculate_dpi_info();
 
-	rc = load_image(&dpi_info, &image_info);
+	rc = load_images(dpi_info, &image_info);
 	if (rc)
 		goto out;
 
-	float animation_y = image_info.y + image_info.height + MM_TO_PX(dpi_info.dpi, 5);
+	float animation_y = image_info.y + image_info.height + MM_TO_PX(dpi_info->dpi, 5);
 
 	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
 					background_color.b));
 
-	draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
+	draw_svg(image_info.image[0], image_info.x, image_info.y, image_info.width, image_info.height);
 
 	if (!message && !message_bottom)
 		goto no_messages;
@@ -568,7 +599,7 @@ int main(int argc, char **argv)
 	if (message)
 		msgs.msg = &msg;
 
-	show_messages(&msgs, &dpi_info);
+	show_messages(&msgs, dpi_info);
 
 no_messages:
 	tfb_flush_window();
@@ -592,7 +623,8 @@ no_messages:
 		}
 		clock_gettime(CLOCK_REALTIME, &start);
 		tick = timespec_to_double(timespec_sub(start, epoch)) * tickrate;
-		animate_frame(tick, screenWidth, animation_y, dpi_info.dpi);
+		animate_frame(tick, screenWidth, animation_y, dpi_info->dpi, &image_info);
+		tfb_flush_window();
 		tfb_flush_fb();
 		clock_gettime(CLOCK_REALTIME, &end);
 		diff = timespec_sub(end, start);
@@ -608,15 +640,18 @@ no_messages:
 
 out:
 	// Before we exit print the logo so it will persist
-	if (image_info.image) {
+	if (image_info.image[0]) {
 		ioctl(tty, KDSETMODE, KD_TEXT);
-		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
+		draw_svg(image_info.image[0], image_info.x, image_info.y, image_info.width, image_info.height);
 	}
 
 	// Draw the messages again so they will persist
-	show_messages(&msgs, &dpi_info);
+	show_messages(&msgs, dpi_info);
 
-	nsvgDelete(image_info.image);
+	for (int i = 0; i < image_info.num_frames; i++) {
+		nsvgDelete(image_info.image[i]);
+		free(image_info.path[i]);
+	}
 	nsvgDelete(msgs.font);
 	free_message(msgs.msg);
 	free_message(msgs.bottom_msg);

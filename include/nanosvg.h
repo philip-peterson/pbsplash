@@ -3022,14 +3022,16 @@ NSVGimage* nsvgParseFromFile(const char* filename, const char* units, float dpi)
 	char* data = NULL;
 	NSVGimage* image = NULL;
 
+	printf("open file %s\n", filename);
+
 	fp = fopen(filename, "rb");
-	if (!fp) goto error;
+	if (!fp) {printf("%d\n", __LINE__); goto error; }
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 	data = (char*)malloc(size+1);
-	if (data == NULL) goto error;
-	if (fread(data, 1, size, fp) != size) goto error;
+	if (data == NULL) {printf("%d\n", __LINE__); goto error; }
+	if (fread(data, 1, size, fp) != size) {printf("%d\n", __LINE__); goto error; }
 	data[size] = '\0';	// Must be null terminated.
 	fclose(fp);
 	image = nsvgParse(data, units, dpi);

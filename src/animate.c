@@ -31,7 +31,25 @@ static void circles_wave(int frame, int w, int y_off, long dpi)
 	}
 }
 
-void animate_frame(int frame, int w, int y_off, long dpi)
+static void animate_logo(int frame, struct image_info *images)
 {
-	circles_wave(frame, w, y_off, dpi);
+	static int step = 0;
+
+	tfb_draw_pixel(0, 0, tfb_black);
+
+	if (frame > 0 && (step + 1) * 4 < frame) {
+		step++;
+	}
+
+	// tfb_fill_rect(images->x, images->y, images->width, images->height,
+	// 	      tfb_black);
+	draw_svg(images->image[step % images->num_frames], images->x, images->y, images->width,
+		 images->height);
+}
+
+void animate_frame(int frame, int w, int y_off, long dpi,
+		   struct image_info *images)
+{
+	animate_logo(frame, images);
+	// circles_wave(frame, w, y_off, dpi);
 }

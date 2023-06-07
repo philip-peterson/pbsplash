@@ -12,6 +12,29 @@ struct col {
    };
 };
 
-void animate_frame(int frame, int w, int y_off, long dpi);
+struct dpi_info {
+	long dpi;
+	int pixels_per_milli;
+	float logo_size_px;
+	int logo_size_max_mm;
+};
+
+typedef struct NSVGimage NSVGimage;
+
+#define MAX_FRAMES 16
+
+struct image_info {
+	char *path[MAX_FRAMES];
+	NSVGimage *image[MAX_FRAMES];
+	int num_frames;
+	float width;
+	float height;
+	float x;
+	float y;
+};
+
+void draw_svg(NSVGimage *image, int x, int y, int w, int h);
+
+void animate_frame(int frame, int w, int y_off, long dpi, struct image_info *images);
 
 #endif

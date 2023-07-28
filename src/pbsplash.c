@@ -194,9 +194,8 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 		NSVGshape *shape = shapes[i];
 		out_text[j] = text[i];
 		if (*width > screenWidth * 0.95) {
-			if (!line_has_space)
-				i--;
 			if (!line_has_space) {
+				i--;
 				if (i < 1) {
 					fprintf(stderr,
 					"ERROR: Text is too long to fit on screen!");
@@ -219,14 +218,12 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 		}
 
 		if (out_text[j] == '\n') {
-			printf("LINE SPLIT, %d %s\n", i, out_text);
 			line_has_space = false;
 			*height += fontHeight;
 			maxWidth = *width > maxWidth ? *width : maxWidth;
 			*width = 0;
 			continue;
 		} else if (text[i] == ' ') {
-			printf("SPACE! %s\n", out_text);
 			line_has_space = true;
 		}
 

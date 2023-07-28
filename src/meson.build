@@ -3,6 +3,8 @@ src = [
         'nanosvg.c',
         'timespec.c',
         'pbsplash.c',
+        'fb.c',
+        'drawing.c',
 ]
 
 executable('pbsplash', src,

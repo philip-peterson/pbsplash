@@ -1,48 +1,46 @@
 #include <errno.h>
+#include <fcntl.h>
+#include <linux/kd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <tfblib/tfb_colors.h>
+#include <tfblib/tfblib.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <linux/kd.h>
-#include <fcntl.h>
-#include <tfblib/tfblib.h>
-#include <tfblib/tfb_colors.h>
 
-#include <string.h>
 #include <math.h>
+#include <string.h>
 #define NANOSVG_ALL_COLOR_KEYWORDS // Include full list of color keywords.
 #include "nanosvg.h"
 #include "nanosvgrast.h"
-#include "timespec.h"
 #include "pbsplash.h"
+#include "timespec.h"
 
-#define MSG_MAX_LEN	  4096
+#define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
-#define LOGO_SIZE_MAX_MM  45
-#define FONT_SIZE_PT	  9
-#define FONT_SIZE_B_PT	  6
-#define B_MESSAGE_OFFSET_MM  3
-#define PT_TO_MM	  0.38f
-#define TTY_PATH_LEN	  11
-
-#define DEBUGRENDER	  0
+#define LOGO_SIZE_MAX_MM 45
+#define FONT_SIZE_PT 9
+#define FONT_SIZE_B_PT 6
+#define B_MESSAGE_OFFSET_MM 3
+#define PT_TO_MM 0.38f
+#define TTY_PATH_LEN 11
 
 volatile sig_atomic_t terminate = 0;
 
 bool debug = false;
-struct col background_color = { .r = 0, .g = 0, .b = 0, .a = 255 };
+struct col bg = { .r = 0, .g = 0, .b = 0, .a = 255 };
 
 static int screenWidth, screenHeight;
 
 #define zalloc(size) calloc(1, size)
 
-#define LOG(fmt, ...)                                                          \
-	do {                                                                   \
-		if (debug)                                                     \
-			printf(fmt, ##__VA_ARGS__);                            \
+#define LOG(fmt, ...)                               \
+	do {                                        \
+		if (debug)                          \
+			printf(fmt, ##__VA_ARGS__); \
 	} while (0)
 
 static int usage()
@@ -74,55 +72,6 @@ static void term(int signum)
 	terminate = 1;
 }
 
-static void blit_buf(unsigned char *buf, int x, int y, int w, int h, bool vflip,
-		     bool redraw)
-{
-	struct col prev_col = { .r = 0, .g = 0, .b = 0, .a = 0 };
-	unsigned int col = tfb_make_color(
-		background_color.r, background_color.g, background_color.b);
-
-	for (size_t i = 0; i < w; i++) {
-		for (size_t j = 0; j < h; j++) {
-#if DEBUGRENDER == 1
-			if (i == 0 || i == w - 1 || j == 0 || j == h - 1) {
-				tfb_draw_pixel(x + i, y + h - j, tfb_red);
-				continue;
-			}
-#endif
-			struct col rgba =
-				*(struct col *)(buf + (j * w + i) * 4);
-			if (rgba.a == 0 || rgba.rgba == background_color.rgba)
-				continue;
-
-			// Alpha blending
-			if (rgba.a != 255) {
-				rgba.r =
-					(rgba.r * rgba.a +
-					 background_color.r * (255 - rgba.a)) >>
-					8;
-				rgba.g =
-					(rgba.g * rgba.a +
-					 background_color.g * (255 - rgba.a)) >>
-					8;
-				rgba.b =
-					(rgba.b * rgba.a +
-					 background_color.b * (255 - rgba.a)) >>
-					8;
-			}
-
-			// No need to generate the colour again if it's the same as the previous one
-			if (rgba.rgba != prev_col.rgba) {
-				prev_col.rgba = rgba.rgba;
-				col = tfb_make_color(rgba.r, rgba.g, rgba.b);
-			}
-			if (vflip)
-				tfb_draw_pixel(x + i, y + h - j, col);
-			else
-				tfb_draw_pixel(x + i, y + j, col);
-		}
-	}
-}
-
 static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 {
 	float sz = (int)((float)w / (float)image->width * 100.f) / 100.f;
@@ -131,25 +80,24 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 	unsigned char *img = zalloc(w * h * 4);
 	nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
 
-	blit_buf(img, x, y, w, h, false, false);
+	blit_buf(img, x, y, w, h, false);
 
 	free(img);
 	nsvgDeleteRasterizer(rast);
 }
 
-static void draw_text(const NSVGimage *font, const char *text, int x, int y, int width,
-		      int height, float scale, unsigned int tfb_col)
+static void draw_text(const NSVGimage *font, const char *text, int x, int y, int width, int height,
+		      float scale, unsigned int tfb_col)
 {
-	LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text,
-	    scale, x, y, width, height);
+	LOG("text '%s': fontsz=%f, x=%d, y=%d, dimensions: %d x %d\n", text, scale, x, y, width,
+	    height);
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
 	unsigned char *img = zalloc(width * height * 4);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
 
-	nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height,
-			  width * 4, text);
+	nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
 
-	blit_buf(img, x, y, width, height, true, false);
+	blit_buf(img, x, y, width, height, true);
 
 	free(img);
 	free(shapes);
@@ -170,7 +118,7 @@ static inline float getShapeWidth(const NSVGimage *font, const NSVGshape *shape)
  * based on the font size and the font SVG file.
  */
 static const char *getTextDimensions(const NSVGimage *font, const char *text, float scale,
-			       int *width, int *height)
+				     int *width, int *height)
 {
 	int i, j;
 	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
@@ -198,7 +146,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 				i--;
 				if (i < 1) {
 					fprintf(stderr,
-					"ERROR: Text is too long to fit on screen!");
+						"ERROR: Text is too long to fit on screen!");
 					goto out;
 				}
 			} else {
@@ -210,7 +158,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 				if (i <= 0) {
 					line_has_space = false;
 					fprintf(stderr,
-					"ERROR: Text is too long to fit on screen!");
+						"ERROR: Text is too long to fit on screen!");
 					goto out;
 				}
 			}
@@ -274,21 +222,21 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 		dpi_info->logo_size_max_mm = (screenWidth * 0.75f) / dpi_info->pixels_per_milli;
 
 	dpi_info->logo_size_px =
-		(float)(screenWidth < screenHeight ? screenWidth :
-						     screenHeight) *
-		0.75f;
+		(float)(screenWidth < screenHeight ? screenWidth : screenHeight) * 0.75f;
 	if (w_mm > 0 && h_mm > 0) {
 		if (w_mm < h_mm) {
 			if (w_mm > dpi_info->logo_size_max_mm * 1.2f)
-				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
+				dpi_info->logo_size_px =
+					dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		} else {
 			if (h_mm > dpi_info->logo_size_max_mm * 1.2f)
-				dpi_info->logo_size_px = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
+				dpi_info->logo_size_px =
+					dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		}
 	}
 
-	printf("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth,
-	    screenHeight, w_mm, h_mm, dpi_info->dpi, dpi_info->logo_size_px);
+	printf("%dx%d @ %dx%dmm, dpi=%ld, logo_size_px=%f\n", screenWidth, screenHeight, w_mm, h_mm,
+	       dpi_info->dpi, dpi_info->logo_size_px);
 }
 
 struct msg_info {
@@ -301,12 +249,13 @@ struct msg_info {
 	float fontsz;
 };
 
-static void load_message(struct msg_info *msg_info, const struct dpi_info *dpi_info, float font_size_pt, const NSVGimage *font)
+static void load_message(struct msg_info *msg_info, const struct dpi_info *dpi_info,
+			 float font_size_pt, const NSVGimage *font)
 {
-	msg_info->fontsz = (font_size_pt * PT_TO_MM) /
-			(font->fontAscent - font->fontDescent) *
-			dpi_info->pixels_per_milli;
-	msg_info->message = getTextDimensions(font, msg_info->src_message, msg_info->fontsz, &msg_info->width, &msg_info->height);
+	msg_info->fontsz = (font_size_pt * PT_TO_MM) / (font->fontAscent - font->fontDescent) *
+			   dpi_info->pixels_per_milli;
+	msg_info->message = getTextDimensions(font, msg_info->src_message, msg_info->fontsz,
+					      &msg_info->width, &msg_info->height);
 	msg_info->x = (screenWidth - msg_info->width) / 2;
 	// Y coordinate is set later
 }
@@ -331,7 +280,7 @@ struct messages {
 static inline void show_message(const struct msg_info *msg_info, const NSVGimage *font)
 {
 	draw_text(font, msg_info->message, msg_info->x, msg_info->y, msg_info->width,
-				msg_info->height, msg_info->fontsz, tfb_gray);
+		  msg_info->height, msg_info->fontsz, tfb_gray);
 }
 
 static void show_messages(struct messages *msgs, const struct dpi_info *dpi_info)
@@ -346,14 +295,16 @@ static void show_messages(struct messages *msgs, const struct dpi_info *dpi_info
 		font_failed = true;
 		fprintf(stderr, "failed to load SVG font, can't render messages\n");
 		fprintf(stderr, "  font_path: %s\n", msgs->font_path);
-		fprintf(stderr, "msg: %s\n\nbottom_message: %s\n", msgs->msg->src_message, msgs->bottom_msg->src_message);
+		fprintf(stderr, "msg: %s\n\nbottom_message: %s\n", msgs->msg->src_message,
+			msgs->bottom_msg->src_message);
 		return;
 	}
 
 	if (msgs->bottom_msg) {
 		if (!msgs->bottom_msg->message) {
 			load_message(msgs->bottom_msg, dpi_info, msgs->font_size_b_pt, msgs->font);
-			msgs->bottom_msg->y = screenHeight - msgs->bottom_msg->height - MM_TO_PX(dpi_info->dpi, B_MESSAGE_OFFSET_MM);
+			msgs->bottom_msg->y = screenHeight - msgs->bottom_msg->height -
+					      MM_TO_PX(dpi_info->dpi, B_MESSAGE_OFFSET_MM);
 		}
 		show_message(msgs->bottom_msg, msgs->font);
 	}
@@ -362,9 +313,15 @@ static void show_messages(struct messages *msgs, const struct dpi_info *dpi_info
 		if (!msgs->msg->message) {
 			load_message(msgs->msg, dpi_info, msgs->font_size_pt, msgs->font);
 			if (msgs->bottom_msg)
-				msgs->msg->y = msgs->bottom_msg->y - msgs->msg->height - (MM_TO_PX(dpi_info->dpi, msgs->font_size_b_pt * PT_TO_MM) * 0.6);
+				msgs->msg->y =
+					msgs->bottom_msg->y - msgs->msg->height -
+					(MM_TO_PX(dpi_info->dpi, msgs->font_size_b_pt * PT_TO_MM) *
+					 0.6);
 			else
-				msgs->msg->y = screenHeight - msgs->msg->height - (MM_TO_PX(dpi_info->dpi, msgs->font_size_pt * PT_TO_MM) * 2);
+				msgs->msg->y =
+					screenHeight - msgs->msg->height -
+					(MM_TO_PX(dpi_info->dpi, msgs->font_size_pt * PT_TO_MM) *
+					 2);
 		}
 		show_message(msgs->msg, msgs->font);
 	}
@@ -394,15 +351,16 @@ static int load_image(const struct dpi_info *dpi_info, struct image_info *image_
 	if (image_info->image->width < image_info->image->height * 1.1)
 		logo_size_px = MM_TO_PX(dpi_info->dpi, 25);
 
-	float sz =
-		(float)logo_size_px /
-		(image_info->image->width > image_info->image->height ? image_info->image->height : image_info->image->width);
+	float sz = (float)logo_size_px / (image_info->image->width > image_info->image->height ?
+						  image_info->image->height :
+						  image_info->image->width);
 	image_info->width = image_info->image->width * sz + 0.5;
 	image_info->height = image_info->image->height * sz + 0.5;
 	if (image_info->width > (dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli)) {
 		float scalefactor =
-			((float)(dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli) / image_info->width);
-		//printf("Got scale factor: %f\n", scalefactor);
+			((float)(dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli) /
+			 image_info->width);
+		// printf("Got scale factor: %f\n", scalefactor);
 		image_info->width = dpi_info->logo_size_max_mm * dpi_info->pixels_per_milli;
 		image_info->height *= scalefactor;
 	}
@@ -476,24 +434,21 @@ int main(int argc, char **argv)
 		case 'o':
 			msgs.font_size_b_pt = strtof(optarg, &end);
 			if (end == optarg) {
-				fprintf(stderr, "Invalid font size: %s\n",
-					optarg);
+				fprintf(stderr, "Invalid font size: %s\n", optarg);
 				return usage();
 			}
 			break;
 		case 'p':
 			msgs.font_size_pt = strtof(optarg, &end);
 			if (end == optarg) {
-				fprintf(stderr, "Invalid font size: %s\n",
-					optarg);
+				fprintf(stderr, "Invalid font size: %s\n", optarg);
 				return usage();
 			}
 			break;
 		case 'q':
 			dpi_info.logo_size_max_mm = strtof(optarg, &end);
 			if (end == optarg) {
-				fprintf(stderr, "Invalid max logo size: %s\n",
-					optarg);
+				fprintf(stderr, "Invalid max logo size: %s\n", optarg);
 				return usage();
 			}
 			break;
@@ -525,10 +480,9 @@ int main(int argc, char **argv)
 
 	LOG("active tty: '%s'\n", active_tty);
 
-	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0",
-				 active_tty)) != TFB_SUCCESS) {
-		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n",
-			rc);
+	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0", active_tty)) !=
+	    TFB_SUCCESS) {
+		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
 		rc = 1;
 		return rc;
 	}
@@ -544,8 +498,7 @@ int main(int argc, char **argv)
 
 	float animation_y = image_info.y + image_info.height + MM_TO_PX(dpi_info.dpi, 5);
 
-	tfb_clear_screen(tfb_make_color(background_color.r, background_color.g,
-					background_color.b));
+	tfb_clear_screen(tfb_make_color(bg.r, bg.g, bg.b));
 
 	draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
 
@@ -593,7 +546,7 @@ no_messages:
 		tfb_flush_fb();
 		clock_gettime(CLOCK_REALTIME, &end);
 		diff = timespec_sub(end, start);
-		//printf("%05d: %09ld\n", tick, diff.tv_nsec);
+		// printf("%05d: %09ld\n", tick, diff.tv_nsec);
 		if (diff.tv_nsec < 1000000000 / target_fps) {
 			struct timespec sleep_time = {
 				.tv_sec = 0,
@@ -607,7 +560,8 @@ out:
 	// Before we exit print the logo so it will persist
 	if (image_info.image) {
 		ioctl(tty, KDSETMODE, KD_TEXT);
-		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width, image_info.height);
+		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width,
+			 image_info.height);
 	}
 
 	// Draw the messages again so they will persist

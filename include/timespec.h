@@ -27,7 +27,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  * For more information, please refer to <http://unlicense.org/>
-*/
+ */
 
 #ifndef DAN_TIMESPEC_H
 #define DAN_TIMESPEC_H
@@ -48,7 +48,7 @@ struct timespec timespec_min(struct timespec ts1, struct timespec ts2);
 struct timespec timespec_max(struct timespec ts1, struct timespec ts2);
 struct timespec timespec_clamp(struct timespec ts1, struct timespec min, struct timespec max);
 
-int  timespec_cmp(struct timespec ts1, struct timespec ts2);
+int timespec_cmp(struct timespec ts1, struct timespec ts2);
 bool timespec_eq(struct timespec ts1, struct timespec ts2);
 bool timespec_gt(struct timespec ts1, struct timespec ts2);
 bool timespec_ge(struct timespec ts1, struct timespec ts2);

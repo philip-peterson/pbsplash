@@ -28,142 +28,11 @@
  */
 
 #include <stdio.h>
-
-// NanoSVG is a simple stupid single-header-file SVG parse. The output of the parser is a list of
-// cubic bezier shapes.
-//
-// The library suits well for anything from rendering scalable icons in your editor application to
-// prototyping a game.
-//
-// NanoSVG supports a wide range of SVG features, but something may be missing, feel free to create
-// a pull request!
-//
-// The shapes in the SVG images are transformed by the viewBox and converted to specified units.
-// That is, you should get the same looking data as your designed in your favorite app.
-//
-// NanoSVG can return the paths in few different units. For example if you want to render an image,
-// you may choose to get the paths in pixels, or if you are feeding the data into a CNC-cutter, you
-// may want to use millimeters.
-//
-// The units passed to NanoSVG should be one of: 'px', 'pt', 'pc' 'mm', 'cm', or 'in'.
-// DPI (dots-per-inch) controls how the unit conversion is done.
-//
-// If you don't know or care about the units stuff, "px" and 96 should get you going.
-
-/* Example Usage:
-	// Load SVG
-	NSVGimage* image;
-	image = nsvgParseFromFile("test.svg", "px", 96);
-	printf("size: %f x %f\n", image->width, image->height);
-	// Use...
-	for (NSVGshape *shape = image->shapes; shape != NULL; shape = shape->next) {
-		for (NSVGpath *path = shape->paths; path != NULL; path = path->next) {
-			for (int i = 0; i < path->npts-1; i += 3) {
-				float* p = &path->pts[i*2];
-				drawCubicBez(p[0],p[1], p[2],p[3], p[4],p[5], p[6],p[7]);
-			}
-		}
-	}
-	// Delete
-	nsvgDelete(image);
-*/
-
-#define NSVG_MAX_UNICODE_LEN 32
-
-enum NSVGpaintType {
-	NSVG_PAINT_NONE = 0,
-	NSVG_PAINT_COLOR = 1,
-	NSVG_PAINT_LINEAR_GRADIENT = 2,
-	NSVG_PAINT_RADIAL_GRADIENT = 3
-};
-
-enum NSVGspreadType { NSVG_SPREAD_PAD = 0, NSVG_SPREAD_REFLECT = 1, NSVG_SPREAD_REPEAT = 2 };
-
-enum NSVGlineJoin { NSVG_JOIN_MITER = 0, NSVG_JOIN_ROUND = 1, NSVG_JOIN_BEVEL = 2 };
-
-enum NSVGlineCap { NSVG_CAP_BUTT = 0, NSVG_CAP_ROUND = 1, NSVG_CAP_SQUARE = 2 };
-
-enum NSVGfillRule { NSVG_FILLRULE_NONZERO = 0, NSVG_FILLRULE_EVENODD = 1 };
-
-enum NSVGflags { NSVG_FLAGS_VISIBLE = 0x01 };
-
-typedef struct NSVGgradientStop {
-	unsigned int color;
-	float offset;
-} NSVGgradientStop;
-
-typedef struct NSVGgradient {
-	float xform[6];
-	char spread;
-	float fx, fy;
-	int nstops;
-	NSVGgradientStop stops[1];
-} NSVGgradient;
-
-typedef struct NSVGpaint {
-	char type;
-	union {
-		unsigned int color;
-		NSVGgradient *gradient;
-	};
-} NSVGpaint;
-
-typedef struct NSVGpath {
-	float *pts; // Cubic bezier points: x0,y0, [cpx1,cpx1,cpx2,cpy2,x1,y1], ...
-	int npts; // Total number of bezier points.
-	char closed; // Flag indicating if shapes should be treated as closed.
-	float bounds[4]; // Tight bounding box of the shape [minx,miny,maxx,maxy].
-	struct NSVGpath *next; // Pointer to next path, or NULL if last element.
-} NSVGpath;
-
-typedef struct NSVGshape {
-	char id[64]; // Optional 'id' attr of the shape or its group
-	NSVGpaint fill; // Fill paint
-	NSVGpaint stroke; // Stroke paint
-	float opacity; // Opacity of the shape.
-	float strokeWidth; // Stroke width (scaled).
-	float strokeDashOffset; // Stroke dash offset (scaled).
-	float strokeDashArray[8]; // Stroke dash array (scaled).
-	char strokeDashCount; // Number of dash values in dash array.
-	char strokeLineJoin; // Stroke join type.
-	char strokeLineCap; // Stroke cap type.
-	float miterLimit; // Miter limit
-	char fillRule; // Fill rule, see NSVGfillRule.
-	unsigned char flags; // Logical or of NSVG_FLAGS_* flags
-	float bounds[4]; // Tight bounding box of the shape [minx,miny,maxx,maxy].
-	char unicode[NSVG_MAX_UNICODE_LEN]; // Unicode character code.
-	int horizAdvX; // Horizontal distance to advance after rendering glyph.
-	NSVGpath *paths; // Linked list of paths in the image.
-	struct NSVGshape *next; // Pointer to next shape, or NULL if last element.
-} NSVGshape;
-
-typedef struct NSVGimage {
-	float width; // Width of the image.
-	float height; // Height of the image.
-	int fontAscent;
-	int fontDescent;
-	int defaultHorizAdv;
-	NSVGshape *shapes; // Linked list of shapes in the image.
-} NSVGimage;
-
-// Parses SVG file from a file, returns SVG image as paths.
-NSVGimage *nsvgParseFromFile(const char *filename, const char *units, float dpi);
-
-// Parses SVG file from a null terminated string, returns SVG image as paths.
-// Important note: changes the string.
-NSVGimage *nsvgParse(char *input, const char *units, float dpi);
-
-// Duplicates a path.
-NSVGpath *nsvgDuplicatePath(NSVGpath *p);
-
-// Deletes an image.
-void nsvgDelete(NSVGimage *image);
-
-NSVGshape **nsvgGetTextShapes(const NSVGimage *image, const char *text, int textLen);
-
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "nanosvg.h"
 
 #define NSVG_PI (3.14159265358979323846264338327f)
 #define NSVG_KAPPA90 \
@@ -1964,10 +1833,17 @@ static void nsvg__parseAttribs(NSVGparser *p, const char **attr)
 			p->image->fontDescent = strtol(attr[i + 1], &end, 10);
 			if (end == attr[i + 1])
 				p->image->fontDescent = 0;
+		} else if (strcmp(attr[i], "units-per-em") == 0) {
+			p->image->fontUnitsPerEm = strtol(attr[i + 1], &end, 10);
+			if (end == attr[i + 1])
+				p->image->fontUnitsPerEm = 2048;
 		} else {
 			nsvg__parseAttr(p, attr[i], attr[i + 1]);
 		}
 	}
+
+	if (p->image->fontAscent && p->image->fontDescent)
+		p->image->fontHeight = (p->image->fontAscent - p->image->fontDescent) / (float)p->image->fontUnitsPerEm * 2048;
 }
 
 static int nsvg__getArgsPerElement(char cmd)
@@ -3264,68 +3140,6 @@ void nsvgDelete(NSVGimage *image)
 	}
 	free(image);
 }
-
-/*
- * Copyright (c) 2013-14 Mikko Mononen memon@inside.org
- *
- * This software is provided 'as-is', without any express or implied
- * warranty.  In no event will the authors be held liable for any damages
- * arising from the use of this software.
- *
- * Permission is granted to anyone to use this software for any purpose,
- * including commercial applications, and to alter it and redistribute it
- * freely, subject to the following restrictions:
- *
- * 1. The origin of this software must not be misrepresented; you must not
- * claim that you wrote the original software. If you use this software
- * in a product, an acknowledgment in the product documentation would be
- * appreciated but is not required.
- * 2. Altered source versions must be plainly marked as such, and must not be
- * misrepresented as being the original software.
- * 3. This notice may not be removed or altered from any source distribution.
- *
- * The polygon rasterization is heavily based on stb_truetype rasterizer
- * by Sean Barrett - http://nothings.org/
- *
- */
-
-typedef struct NSVGrasterizer NSVGrasterizer;
-
-/* Example Usage:
-	// Load SVG
-	NSVGimage* image;
-	image = nsvgParseFromFile("test.svg", "px", 96);
-
-	// Create rasterizer (can be used to render multiple images).
-	struct NSVGrasterizer* rast = nsvgCreateRasterizer();
-	// Allocate memory for image
-	unsigned char* img = malloc(w*h*4);
-	// Rasterize
-	nsvgRasterize(rast, image, 0,0,1, img, w, h, w*4);
-*/
-
-// Allocated rasterizer context.
-NSVGrasterizer *nsvgCreateRasterizer();
-
-// Rasterizes SVG image, returns RGBA image (non-premultiplied alpha)
-//   r - pointer to rasterizer context
-//   image - pointer to image to rasterize
-//   tx,ty - image offset (applied after scaling)
-//   scale - image scale
-//   dst - pointer to destination image data, 4 bytes per pixel (RGBA)
-//   w - width of the image to render
-//   h - height of the image to render
-//   stride - number of bytes per scaleline in the destination buffer
-void nsvgRasterize(NSVGrasterizer *r, NSVGimage *image, float tx, float ty, float scale,
-		   unsigned char *dst, int w, int h, int stride);
-
-// Deletes rasterizer context.
-void nsvgDeleteRasterizer(NSVGrasterizer *);
-
-void nsvgRasterizeText(NSVGrasterizer *r, const NSVGimage *font, float tx, float ty, float scale,
-		       unsigned char *dst, int w, int h, int stride, const char *text);
-
-#include <math.h>
 
 #define NSVG__SUBSAMPLES 5
 #define NSVG__FIXSHIFT 10
@@ -4705,7 +4519,8 @@ void nsvgRasterizeText(NSVGrasterizer *r, const NSVGimage *font, float tx, float
 	NSVGcachedPaint cache;
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
 	int i = 0, j = 0, textLen = strlen(text);
-	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
+	//int fontHeight = (font->fontAscent - font->fontDescent) * scale;
+	int fontHeight = font->fontHeight * scale;
 	int xStart = tx;
 	int charWidth = font->defaultHorizAdv * scale;
 
@@ -4746,8 +4561,13 @@ void nsvgRasterizeText(NSVGrasterizer *r, const NSVGimage *font, float tx, float
 		if (!(shape->flags & NSVG_FLAGS_VISIBLE))
 			continue;
 
-		if (i == 0 && strcmp(shape->id, "OpenSansRegular") == 0)
-			tx = xStart - charWidth;
+		/* FIXME: specific fonts need stupid offsets */
+		if (i == 0) {
+			if (strcmp(shape->id, "OpenSansRegular") == 0)
+				tx = xStart - charWidth / 2.f;
+			else if (strcmp(shape->id, "Iosevka-Term") == 0)
+				tx = xStart + charWidth;
+		}
 
 		if (shape->fill.type != NSVG_PAINT_NONE) {
 			nsvg__resetPool(r);

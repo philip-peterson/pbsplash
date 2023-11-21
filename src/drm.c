@@ -128,6 +128,8 @@ static int drm_init(int fd)
 		return -errno;
 	}
 
+	drmSetMaster(fd);
+
 	/* iterate all connectors */
 	for (i = 0; i < res->count_connectors; ++i) {
 		/* get information for each connector */
@@ -424,9 +426,6 @@ int drm_framebuffer_init(int *handle, const char *card)
 		return ret;
 	}
 
-	printf("DRM mode %dx%d @ %dHz\n", drm->bufs[0].width, drm->bufs[0].height,
-	       drm->mode.vrefresh);
-
 	/* draw some colors for 5seconds */
 	// modeset_draw(*handle);
 
@@ -457,6 +456,8 @@ void drm_framebuffer_close(int handle)
 	/* destroy framebuffers */
 	modeset_destroy_fb(handle, &drm->bufs[1]);
 	modeset_destroy_fb(handle, &drm->bufs[0]);
+
+	drmDropMaster(handle);
 
 	/* free allocated memory */
 	free(drm);

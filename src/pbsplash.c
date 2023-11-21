@@ -11,9 +11,7 @@
 
 #include <math.h>
 #include <string.h>
-#define NANOSVG_ALL_COLOR_KEYWORDS // Include full list of color keywords.
 #include "nanosvg.h"
-#include "nanosvgrast.h"
 #include "pbsplash.h"
 #include "tfblib.h"
 #include "timespec.h"

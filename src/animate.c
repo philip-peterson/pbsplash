@@ -1,8 +1,8 @@
 #include "pbsplash.h"
 #include <math.h>
 #include <stdio.h>
-#include <tfblib/tfb_colors.h>
-#include <tfblib/tfblib.h>
+
+#include "tfblib.h"
 
 struct col color = { .r = 255, .g = 255, .b = 255, .a = 255 };
 
@@ -28,6 +28,14 @@ static void circles_wave(int frame, int w, int y_off, long dpi)
 			      amplitude * 2 + rad * 2 + 6, tfb_black);
 		tfb_fill_circle(x, y, rad, t_col);
 	}
+
+	// tfb_draw_line(0, 0, 100, 500, tfb_red);
+	// tfb_draw_line(100, 0, 100, 500, tfb_green);
+	// tfb_draw_line(200, 0, 100, 500, tfb_blue);
+
+	// tfb_fill_rect(400, 300, 200, 500, tfb_red);
+	// tfb_fill_rect(600, 300, 200, 500, tfb_green);
+	// tfb_fill_rect(800, 300, 200, 500, tfb_blue);
 }
 
 void animate_frame(int frame, int w, int y_off, long dpi)

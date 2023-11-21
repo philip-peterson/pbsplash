@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <tfblib/tfb_colors.h>
-#include <tfblib/tfblib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -17,6 +15,7 @@
 #include "nanosvg.h"
 #include "nanosvgrast.h"
 #include "pbsplash.h"
+#include "tfblib.h"
 #include "timespec.h"
 
 #define MSG_MAX_LEN 4096
@@ -30,7 +29,7 @@
 
 volatile sig_atomic_t terminate = 0;
 
-bool debug = false;
+bool debug = true;
 struct col bg = { .r = 0, .g = 0, .b = 0, .a = 255 };
 
 static int screenWidth, screenHeight;
@@ -78,9 +77,10 @@ static void draw_svg(NSVGimage *image, int x, int y, int w, int h)
 	LOG("draw_svg: (%d, %d), %dx%d, %f\n", x, y, w, h, sz);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
 	unsigned char *img = zalloc(w * h * 4);
+	struct col bg = { .r = 0, .g = 0, .b = 0, .a = 255 };
 	nsvgRasterize(rast, image, 0, 0, sz, img, w, h, w * 4);
 
-	blit_buf(img, x, y, w, h, false);
+	blit_buf(img, x, y, w, h, bg, false);
 
 	free(img);
 	nsvgDeleteRasterizer(rast);
@@ -94,10 +94,11 @@ static void draw_text(const NSVGimage *font, const char *text, int x, int y, int
 	NSVGshape **shapes = nsvgGetTextShapes(font, text, strlen(text));
 	unsigned char *img = zalloc(width * height * 4);
 	NSVGrasterizer *rast = nsvgCreateRasterizer();
+	struct col bg = { .r = 0, .g = 0, .b = 0, .a = 255 };
 
 	nsvgRasterizeText(rast, font, 0, 0, scale, img, width, height, width * 4, text);
 
-	blit_buf(img, x, y, width, height, true);
+	blit_buf(img, x, y, width, height, bg, true);
 
 	free(img);
 	free(shapes);
@@ -198,7 +199,7 @@ static void calculate_dpi_info(struct dpi_info *dpi_info)
 	int h_mm = tfb_screen_height_mm();
 
 	if ((w_mm < 1 || h_mm < 1) && !dpi_info->dpi) {
-		fprintf(stderr, "ERROR!!!: Invalid screen size: %dx%d\n", w_mm, h_mm);
+		fprintf(stderr, "ERROR!!!: Invalid screen size: %dmmx%dmm\n", w_mm, h_mm);
 
 		// Assume a dpi of 300
 		// This should be readable everywhere
@@ -467,22 +468,28 @@ int main(int argc, char **argv)
 		}
 	}
 
-	{
-		FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
-		int len = strlen(active_tty);
-		char *ptr = active_tty + len;
-		if (fp != NULL) {
-			fgets(ptr, TTY_PATH_LEN - len, fp);
-			*(ptr + strlen(ptr) - 1) = '\0';
-			fclose(fp);
-		}
-	}
+	// {
+	// 	FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
+	// 	int len = strlen(active_tty);
+	// 	char *ptr = active_tty + len;
+	// 	if (fp != NULL) {
+	// 		fgets(ptr, TTY_PATH_LEN - len, fp);
+	// 		*(ptr + strlen(ptr) - 1) = '\0';
+	// 		fclose(fp);
+	// 	}
+	// }
 
-	LOG("active tty: '%s'\n", active_tty);
+	// LOG("active tty: '%s'\n", active_tty);
 
-	if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0", active_tty)) !=
-	    TFB_SUCCESS) {
-		fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
+	// if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0", active_tty)) !=
+	//     TFB_SUCCESS) {
+	// 	fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
+	// 	rc = 1;
+	// 	return rc;
+	// }
+
+	if ((rc = tfb_acquire_drm(0, "/dev/dri/card0")) != 0) {
+		fprintf(stderr, "tfb_acquire_drm() failed with error code: %d\n", rc);
 		rc = 1;
 		return rc;
 	}
@@ -521,15 +528,16 @@ int main(int argc, char **argv)
 	show_messages(&msgs, &dpi_info);
 
 no_messages:
+	/* This is necessary to copy the parts we draw once (like the logo) to the front buffer */
 	tfb_flush_window();
 	tfb_flush_fb();
 
 	int tick = 0;
-	int tty = open(active_tty, O_RDWR);
-	if (!tty) {
-		fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
-		goto out;
-	}
+	// int tty = open(active_tty, O_RDWR);
+	// if (!tty) {
+	// 	fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
+	// 	goto out;
+	// }
 
 	struct timespec epoch, start, end, diff;
 	int target_fps = 60;
@@ -546,7 +554,7 @@ no_messages:
 		tfb_flush_fb();
 		clock_gettime(CLOCK_REALTIME, &end);
 		diff = timespec_sub(end, start);
-		// printf("%05d: %09ld\n", tick, diff.tv_nsec);
+		//printf("%05d: %09ld\n", tick, diff.tv_nsec);
 		if (diff.tv_nsec < 1000000000 / target_fps) {
 			struct timespec sleep_time = {
 				.tv_sec = 0,
@@ -559,7 +567,7 @@ no_messages:
 out:
 	// Before we exit print the logo so it will persist
 	if (image_info.image) {
-		ioctl(tty, KDSETMODE, KD_TEXT);
+		//ioctl(tty, KDSETMODE, KD_TEXT);
 		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width,
 			 image_info.height);
 	}

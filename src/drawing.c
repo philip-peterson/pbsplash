@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "pbsplash.h"
+#include "framebuffer.h"
 #include "tfblib.h"
 
 extern inline uint32_t tfb_make_color(uint8_t red, uint8_t green, uint8_t blue);
@@ -48,11 +49,6 @@ uint8_t __fb_b_mask_size;
 uint8_t __fb_r_pos;
 uint8_t __fb_g_pos;
 uint8_t __fb_b_pos;
-
-int tfb_set_center_window_size(uint32_t w, uint32_t h)
-{
-	return tfb_set_window(__fb_screen_w / 2 - w / 2, __fb_screen_h / 2 - h / 2, w, h);
-}
 
 void tfb_clear_screen(uint32_t color)
 {
@@ -141,10 +137,22 @@ void tfb_fill_rect(int x, int y, int w, int h, uint32_t color)
 	if (w < 0 || h < 0)
 		return;
 
+	/*
+	for (uint32_t cy = y; cy < yend; cy++) {
+		//memset(dest, color, w);
+		for (uint32_t cx = x; cx < x + w; cx++)
+			tfb_draw_pixel(cx, cy, color);
+	}
+	*/
+
 	w = MIN(w, MAX(0, (int)__fb_win_end_x - x));
 	yend = MIN(y + h, __fb_win_end_y);
 
-	dest = __fb_buffer + y * __fb_pitch + (x << 2);
+	dest = __fb_buffer + y * __fb_pitch + (x * 4);
+
+	/* drm alignment weirdness */
+	//if (drm)
+	w *= 4;
 
 	for (uint32_t cy = y; cy < yend; cy++, dest += __fb_pitch)
 		memset(dest, color, w);

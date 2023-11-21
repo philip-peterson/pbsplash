@@ -4,6 +4,7 @@ src = [
         'timespec.c',
         'pbsplash.c',
         'fb.c',
+        'drm.c',
         'drawing.c',
 ]
 

@@ -85,6 +85,8 @@
  */
 int tfb_acquire_fb(u32 flags, const char *fb_device, const char *tty_device);
 
+int tfb_acquire_drm(uint32_t flags, const char *device);
+
 /**
  * Release the framebuffer device
  *
@@ -96,23 +98,6 @@ int tfb_acquire_fb(u32 flags, const char *fb_device, const char *tty_device);
  *          kb mode to its original value.
  */
 void tfb_release_fb(void);
-
-/**
- * Limit the drawing to a window at (x, y) having size (w, h)
- *
- * In case the application does not want to use the whole screen, it can call
- * this function to get the coordinate system shifted by (+x, +y) and everything
- * outside of it just cut off. Using windows smaller than then screen could
- * improve application's performance.
- *
- * @param[in] x      X coordinate of the window, in pixels
- * @param[in] y      Y coordinate of the window, in pixels
- * @param[in] w      Width of the window, in pixels
- * @param[in] h      Height of the window, in pixels
- *
- * @return           #TFB_SUCCESS in case of success or #TFB_ERR_INVALID_WINDOW.
- */
-int tfb_set_window(u32 x, u32 y, u32 w, u32 h);
 
 /**
  * Limit the drawing to a window having size (w, h) at the center of the screen
@@ -529,6 +514,7 @@ extern u8 __fb_g_pos;
 extern u8 __fb_b_pos;
 
 extern uint32_t tfb_red;
+extern uint32_t tfb_green;
 extern uint32_t tfb_blue;
 extern uint32_t tfb_white;
 extern uint32_t tfb_gray;

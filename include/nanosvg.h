@@ -103,6 +103,8 @@ typedef struct NSVGimage {
 	float height; // Height of the image.
 	int fontAscent;
 	int fontDescent;
+	int fontUnitsPerEm;
+	int fontHeight;
 	int defaultHorizAdv;
 	NSVGshape *shapes; // Linked list of shapes in the image.
 } NSVGimage;

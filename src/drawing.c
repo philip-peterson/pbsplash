@@ -11,6 +11,8 @@
 #include "framebuffer.h"
 #include "tfblib.h"
 
+#define DEBUGRENDER 0
+
 extern inline uint32_t tfb_make_color(uint8_t red, uint8_t green, uint8_t blue);
 extern inline void tfb_draw_pixel(int x, int y, uint32_t color);
 extern inline uint32_t tfb_screen_width(void);
@@ -137,22 +139,14 @@ void tfb_fill_rect(int x, int y, int w, int h, uint32_t color)
 	if (w < 0 || h < 0)
 		return;
 
-	/*
-	for (uint32_t cy = y; cy < yend; cy++) {
-		//memset(dest, color, w);
-		for (uint32_t cx = x; cx < x + w; cx++)
-			tfb_draw_pixel(cx, cy, color);
-	}
-	*/
-
 	w = MIN(w, MAX(0, (int)__fb_win_end_x - x));
 	yend = MIN(y + h, __fb_win_end_y);
 
 	dest = __fb_buffer + y * __fb_pitch + (x * 4);
 
 	/* drm alignment weirdness */
-	//if (drm)
-	w *= 4;
+	if (drm)
+		w *= 4;
 
 	for (uint32_t cy = y; cy < yend; cy++, dest += __fb_pitch)
 		memset(dest, color, w);
@@ -258,8 +252,6 @@ void tfb_fill_circle(int cx, int cy, int r, uint32_t color)
 			if (x * x + y * y <= r2)
 				tfb_draw_pixel(cx + x, cy + y, color);
 }
-
-#define DEBUGRENDER 0
 
 /* x and y are expected to be relative to the screen rotation, however the buffer
  * width and height won't be, we need to handle rotating the buffer here.

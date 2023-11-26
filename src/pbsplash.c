@@ -108,6 +108,7 @@ static inline float getShapeWidth(const NSVGimage *font, const NSVGshape *shape)
 	if (shape) {
 		return shape->horizAdvX;
 	} else {
+		//printf("WARNING: Shape for '%s' is NULL!\n", shape->unicode ?: "");
 		return font->defaultHorizAdv;
 	}
 }
@@ -120,7 +121,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 				     int *width, int *height)
 {
 	int i, j;
-	int fontHeight = (font->fontAscent - font->fontDescent) * scale;
+	int fontHeight = font->fontHeight * scale;
 	int maxWidth = 0;
 
 	if (text == NULL)
@@ -129,7 +130,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 	// Pre-allocate 3x the size to account for any word splitting
 	char *out_text = zalloc(strlen(text) * 3 + 1);
 
-	*width = 2; // font->defaultHorizAdv * scale;
+	*width = font->defaultHorizAdv * scale;
 	// The height is simply the height of the font * the scale factor
 	*height = fontHeight;
 
@@ -174,7 +175,7 @@ static const char *getTextDimensions(const NSVGimage *font, const char *text, fl
 			line_has_space = true;
 		}
 
-		*width += round(getShapeWidth(font, shape) * scale);
+		*width += ceil(getShapeWidth(font, shape) * scale);
 	}
 
 	*width = *width > maxWidth ? *width : maxWidth;

@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "config.h"
 #include "pbsplash.h"
 
 /// Convenience macro used to shorten the signatures. Undefined at the end.
@@ -85,7 +86,11 @@
  */
 int tfb_acquire_fb(u32 flags, const char *fb_device, const char *tty_device);
 
+#ifdef CONFIG_DRM_SUPPORT
 int tfb_acquire_drm(uint32_t flags, const char *device);
+#else
+#define tfb_acquire_drm(f, d) ({ -1; })
+#endif
 
 /**
  * Release the framebuffer device

@@ -9,12 +9,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <math.h>
-#include <string.h>
+#include "config.h"
 #include "nanosvg.h"
 #include "pbsplash.h"
 #include "tfblib.h"
 #include "timespec.h"
+#include <math.h>
+#include <string.h>
 
 #define MSG_MAX_LEN 4096
 #define DEFAULT_FONT_PATH "/usr/share/pbsplash/OpenSans-Regular.svg"
@@ -48,17 +49,20 @@ static int usage()
 	fprintf(stderr, "pbsplash [-v] [-h] [-f font] [-s splash image] [-m message]\n");
 	fprintf(stderr, "         [-b message bottom] [-o font size bottom]\n");
 	fprintf(stderr, "         [-p font size] [-q max logo size] [-d] [-e]\n\n");
-	fprintf(stderr, "    -v           enable verbose logging\n");
-	fprintf(stderr, "    -h           show this help\n");
-	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
-	fprintf(stderr, "    -s           path to splash image to display\n");
-	fprintf(stderr, "    -m           message to show under the splash image\n");
 	fprintf(stderr, "    -b           message to show at the bottom\n");
+	fprintf(stderr, "    -d           custom DPI (for testing)\n");
+	fprintf(stderr, "    -e           error (no loading animation)\n");
+	fprintf(stderr, "    -f           path to SVG font file (default: %s)\n", DEFAULT_FONT_PATH);
+	fprintf(stderr, "    -h           show this help\n");
+	fprintf(stderr, "    -m           message to show under the splash image\n");
 	fprintf(stderr, "    -o           font size bottom in pt (default: %d)\n", FONT_SIZE_B_PT);
 	fprintf(stderr, "    -p           font size in pt (default: %d)\n", FONT_SIZE_PT);
 	fprintf(stderr, "    -q           max logo size in mm (default: %d)\n", LOGO_SIZE_MAX_MM);
-	fprintf(stderr, "    -d           custom DPI (for testing)\n");
-	fprintf(stderr, "    -e           error (no loading animation)\n");
+#ifdef CONFIG_DRM_SUPPORT
+	fprintf(stderr, "    -r           use DRM for rendering instead of framebuffer");
+#endif
+	fprintf(stderr, "    -s           path to splash image to display\n");
+	fprintf(stderr, "    -v           enable verbose logging\n");
 	// clang-format on
 
 	return 1;
@@ -108,7 +112,7 @@ static inline float getShapeWidth(const NSVGimage *font, const NSVGshape *shape)
 	if (shape) {
 		return shape->horizAdvX;
 	} else {
-		//printf("WARNING: Shape for '%s' is NULL!\n", shape->unicode ?: "");
+		// printf("WARNING: Shape for '%s' is NULL!\n", shape->unicode ?: "");
 		return font->defaultHorizAdv;
 	}
 }
@@ -400,6 +404,7 @@ int main(int argc, char **argv)
 	};
 	int optflag;
 	bool animation = true;
+	bool use_drm = false;
 
 	memset(active_tty, '\0', TTY_PATH_LEN);
 	strcat(active_tty, "/dev/");
@@ -409,7 +414,7 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	while ((optflag = getopt(argc, argv, "hvf:s:m:b:o:p:q:d:e")) != -1) {
+	while ((optflag = getopt(argc, argv, "hvf:s:m:b:o:p:q:d:er")) != -1) {
 		char *end = NULL;
 		switch (optflag) {
 		case 'h':
@@ -452,6 +457,13 @@ int main(int argc, char **argv)
 				return usage();
 			}
 			break;
+		case 'r':
+#ifndef CONFIG_DRM_SUPPORT
+			fprintf(stderr, "DRM support not compiled in\n");
+			return usage();
+#endif
+			use_drm = true;
+			break;
 		case 'd':
 			dpi_info.dpi = strtol(optarg, &end, 10);
 			if (end == optarg || dpi_info.dpi < 0) {
@@ -467,27 +479,25 @@ int main(int argc, char **argv)
 		}
 	}
 
-	// {
-	// 	FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
-	// 	int len = strlen(active_tty);
-	// 	char *ptr = active_tty + len;
-	// 	if (fp != NULL) {
-	// 		fgets(ptr, TTY_PATH_LEN - len, fp);
-	// 		*(ptr + strlen(ptr) - 1) = '\0';
-	// 		fclose(fp);
-	// 	}
-	// }
+	/* Framebuffer */
+	if (!use_drm) {
+		FILE *fp = fopen("/sys/devices/virtual/tty/tty0/active", "r");
+		int len = strlen(active_tty);
+		char *ptr = active_tty + len;
+		if (fp != NULL) {
+			fgets(ptr, TTY_PATH_LEN - len, fp);
+			*(ptr + strlen(ptr) - 1) = '\0';
+			fclose(fp);
+		}
 
-	// LOG("active tty: '%s'\n", active_tty);
+		LOG("active tty: '%s'\n", active_tty);
 
-	// if ((rc = tfb_acquire_fb(/*TFB_FL_NO_TTY_KD_GRAPHICS */ 0, "/dev/fb0", active_tty)) !=
-	//     TFB_SUCCESS) {
-	// 	fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
-	// 	rc = 1;
-	// 	return rc;
-	// }
-
-	if ((rc = tfb_acquire_drm(0, "/dev/dri/card0")) != 0) {
+		if ((rc = tfb_acquire_fb(0, "/dev/fb0", active_tty)) != 0) {
+			fprintf(stderr, "tfb_acquire_fb() failed with error code: %d\n", rc);
+			rc = 1;
+			return rc;
+		}
+	} else if ((rc = tfb_acquire_drm(0, "/dev/dri/card0")) != 0) {
 		fprintf(stderr, "tfb_acquire_drm() failed with error code: %d\n", rc);
 		rc = 1;
 		return rc;
@@ -532,11 +542,15 @@ no_messages:
 	tfb_flush_fb();
 
 	int tick = 0;
-	// int tty = open(active_tty, O_RDWR);
-	// if (!tty) {
-	// 	fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
-	// 	goto out;
-	// }
+	int tty = 0;
+
+	if (!use_drm) {
+		open(active_tty, O_RDWR);
+		if (!tty) {
+			fprintf(stderr, "Failed to open tty %s (%d)\n", active_tty, errno);
+			goto out;
+		}
+	}
 
 	struct timespec epoch, start, end, diff;
 	int target_fps = 60;
@@ -553,7 +567,7 @@ no_messages:
 		tfb_flush_fb();
 		clock_gettime(CLOCK_REALTIME, &end);
 		diff = timespec_sub(end, start);
-		//printf("%05d: %09ld\n", tick, diff.tv_nsec);
+		// printf("%05d: %09ld\n", tick, diff.tv_nsec);
 		if (diff.tv_nsec < 1000000000 / target_fps) {
 			struct timespec sleep_time = {
 				.tv_sec = 0,
@@ -564,15 +578,18 @@ no_messages:
 	}
 
 out:
-	// Before we exit print the logo so it will persist
-	if (image_info.image) {
-		//ioctl(tty, KDSETMODE, KD_TEXT);
-		draw_svg(image_info.image, image_info.x, image_info.y, image_info.width,
-			 image_info.height);
-	}
+	/* Currently DRM doesn't persist the framebuffer after exiting */
+	if (!use_drm) {
+		// Before we exit print the logo so it will persist
+		if (image_info.image) {
+			ioctl(tty, KDSETMODE, KD_TEXT);
+			draw_svg(image_info.image, image_info.x, image_info.y, image_info.width,
+				 image_info.height);
+		}
 
-	// Draw the messages again so they will persist
-	show_messages(&msgs, &dpi_info);
+		// Draw the messages again so they will persist
+		show_messages(&msgs, &dpi_info);
+	}
 
 	nsvgDelete(image_info.image);
 	nsvgDelete(msgs.font);

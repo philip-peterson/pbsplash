@@ -1,12 +1,16 @@
-#ifndef _FRAMEBUFFER_H
-#define _FRAMEBUFFER_H
+#pragma once
 
 #include <stdint.h>
+
+#include "config.h"
+
+#ifdef CONFIG_DRM_SUPPORT
 
 #include <libdrm/drm.h>
 #include <libdrm/drm_mode.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+
 
 struct modeset_buf {
 	uint32_t width;
@@ -32,6 +36,8 @@ struct drm_framebuffer {
 
 extern struct drm_framebuffer *drm;
 
+#endif
+
 int drm_framebuffer_init(int *handle, const char *card);
 void drm_framebuffer_close(int handle);
-#endif
+

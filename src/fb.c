@@ -15,9 +15,10 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "framebuffer.h"
 #include "pbsplash.h"
 #include "tfblib.h"
+
+#include "tfblib_drm.h"
 
 #define DEFAULT_FB_DEVICE "/dev/fb0"
 #define DEFAULT_TTY_DEVICE "/dev/tty"
@@ -51,6 +52,7 @@ static int tfb_set_window(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32
 	return 0;
 }
 
+#ifdef CONFIG_DRM_SUPPORT
 int tfb_acquire_drm(uint32_t flags, const char *device)
 {
 	int ret;
@@ -86,6 +88,7 @@ int tfb_acquire_drm(uint32_t flags, const char *device)
 
 	return 0;
 }
+#endif
 
 int tfb_acquire_fb(uint32_t flags, const char *fb_device, const char *tty_device)
 {
@@ -259,6 +262,7 @@ void tfb_flush_window(void)
 
 int tfb_flush_fb(void)
 {
+#ifdef CONFIG_DRM_SUPPORT
 	int ret;
 	struct modeset_buf *buf;
 	if (drmfd >= 0) {
@@ -276,6 +280,7 @@ int tfb_flush_fb(void)
 		__fb_buffer = buf->map; //drm->bufs[drm->front_buf ^ 1].map;
 		return 0;
 	}
+#endif
 	__fbi.activate |= FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
 	if (ioctl(fbfd, FBIOPUT_VSCREENINFO, &__fbi) < 0) {
 		perror("Couldn't flush framebuffer");
@@ -287,15 +292,19 @@ int tfb_flush_fb(void)
 
 uint32_t tfb_screen_width_mm(void)
 {
+#ifdef CONFIG_DRM_SUPPORT
 	if (drmfd >= 0)
 		return drm->mm_width;
+#endif
 
 	return __fbi.width;
 }
 uint32_t tfb_screen_height_mm(void)
 {
+#ifdef CONFIG_DRM_SUPPORT
 	if (drmfd >= 0)
 		return drm->mm_height;
+#endif
 
 	return __fbi.height;
 }

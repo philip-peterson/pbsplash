@@ -8,8 +8,9 @@
 #include <string.h>
 
 #include "pbsplash.h"
-#include "framebuffer.h"
 #include "tfblib.h"
+
+#include "tfblib_drm.h"
 
 #define DEBUGRENDER 0
 
@@ -145,8 +146,10 @@ void tfb_fill_rect(int x, int y, int w, int h, uint32_t color)
 	dest = __fb_buffer + y * __fb_pitch + (x * 4);
 
 	/* drm alignment weirdness */
+#ifdef CONFIG_DRM_SUPPORT
 	if (drm)
 		w *= 4;
+#endif
 
 	for (uint32_t cy = y; cy < yend; cy++, dest += __fb_pitch)
 		memset(dest, color, w);

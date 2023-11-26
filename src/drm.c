@@ -40,7 +40,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
-#include "framebuffer.h"
+#include "tfblib_drm.h"
 
 struct modeset_buf;
 struct drm_framebuffer;
